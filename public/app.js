@@ -11,11 +11,12 @@ const state = {
   sidebar: {
     open: false,
     width: 380,
+    prevWidth: 380, // width to restore when the main chat was collapsed
   },
-  // Explain windows: a tree of sessions. Roots are created from the main chat,
-  // children from selections made inside an explain window.
+  // Explainer containers: a tree of split panes. Roots are created from the
+  // main chat, children from selections made inside an explainer container.
   explains: {
-    nodes: {},   // id -> { id, parentId, selection, system, messages, busy, streamId, controller, createdAt }
+    nodes: {},   // id -> { id, parentId, selection, system, messages, busy, streamId, controller, createdAt, w, cw }
     roots: [],   // root ids in creation order (these become the tabs)
     activeId: null,
   },
@@ -39,10 +40,17 @@ const resizeHandle = $('resize-handle');
 const rightSidebar = $('right-sidebar');
 const explainTabs = $('explain-tabs');
 const explainPanels = $('explain-panels');
+const chatArea = $('chat-area');
 const explainsToggle = $('explains-toggle');
 const explainsCount = $('explains-count');
 const sidebarClose = $('sidebar-close');
 const sidebarReset = $('sidebar-reset');
+const summaryBtn = $('summary-btn');
+const summaryOverlay = $('summary-overlay');
+const summaryBody = $('summary-body');
+const summaryStatus = $('summary-status');
+const summaryClose = $('summary-close');
+const summaryRefresh = $('summary-refresh');
 const popup = $('selection-popup');
 
 /* ================= Safe markdown rendering ================= */
@@ -285,6 +293,8 @@ async function createConversation() {
   state.currentId = conv.id;
   state.messages = [];
   clearExplainWindows(); // fresh explain panel for a new conversation
+  delete summaryCache[conv.id];
+  renderSummary(null, '');
   renderConversationList();
   renderMessages();
   updateTitle();
@@ -331,7 +341,8 @@ function explainSnapshot() {
       system: n.system,
       messages: n.messages,
       createdAt: n.createdAt,
-      h: n.h, // layout: 'auto' (expanded) or pixel height (incl. 4px collapsed line)
+      w: n.w,   // flex share inside the parent's split (children)
+      cw: n.cw, // own content-pane share
     };
   }
   return {
@@ -384,6 +395,9 @@ async function selectConversation(id) {
   const prevSnapshot = explainSnapshot();
   const prevMessages = state.messages;
 
+  // Leaving a conversation -> refresh its Topics summary in the background.
+  if (prevId && prevId !== id) runSummary(prevId, prevMessages, prevSnapshot, false);
+
   // Fresh panel for the incoming conversation — no windows leak across.
   clearExplainWindows();
 
@@ -408,7 +422,12 @@ async function selectConversation(id) {
   renderMessages();
   renderConversationList();
   updateTitle();
+  // Topics summary: show the cached version instantly, refresh in background.
+  if (conv && conv.summary) summaryCache[conv.id] = conv.summary;
+  else delete summaryCache[id];
+  renderSummary(summaryCache[id] || null, '');
   restoreExplainWindows(conv && conv.explains);
+  runSummary(id, state.messages, explainSnapshot(), false);
   input.focus();
 }
 
@@ -417,6 +436,7 @@ async function deleteConversation(id, e) {
   if (!confirm('Delete this conversation?')) return;
   await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
   state.conversations = state.conversations.filter((c) => c.id !== id);
+  delete summaryCache[id];
   if (state.currentId === id) {
     state.currentId = null;
     state.messages = [];
@@ -432,12 +452,20 @@ function updateTitle() {
   currentTitle.textContent = conv ? conv.title : 'New conversation';
 }
 
-/* ================= Explain windows (tree of sessions) ================= */
+/* ================= Explainer containers (recursive vertical splits) ================= */
 /*
- * Each selection creates a NEW window — windows are never overridden.
- * - Selection in the main chat  -> root window (shows up in the tab strip)
- * - Selection inside a window   -> child window (linked above via tree row)
- * Snapshots are saved per conversation and restored when you come back.
+ * Design (desktop):
+ * - The main conversation | explainer split can be squeezed so the main chat
+ *   becomes a few-pixel line (double-click the divider to toggle).
+ * - Selecting text in the MAIN chat opens a ROOT container (root tabs on top).
+ * - Selecting text INSIDE a container splits it with a vertical divider,
+ *   mirroring the main-chat | explainer layout:
+ *       [parent content] | [newest child] | [older children ...]
+ *   (the newest child sits closest to the parent content).
+ * - Recursive: children split the same way at unlimited depth.
+ * - Every pane is draggable down to a few pixels; a collapsed pane becomes a
+ *   line that expands on click. Each container shows tabs for its children.
+ * - Widths (w/cw) are snapshotted per conversation and restored on return.
  */
 
 function formatCtx(msgs) {
@@ -491,154 +519,14 @@ function buildExplainSystem(selection, parentId) {
   ].join('\n');
 }
 
-/* ---------- panel (window) DOM ---------- */
+/* ---------- tree helpers ---------- */
 
 function panelEl(id) {
-  return explainPanels.querySelector(`.explain-panel[data-id="${id}"]`);
+  return explainPanels.querySelector(`.ex-container[data-id="${id}"]`);
 }
 
-function createPanelEl(node) {
-  const depth = depthOf(node);
-  const el = document.createElement('div');
-  el.className = 'explain-panel';
-  el.dataset.id = node.id;
-  el.dataset.depth = String(depth);
-  el.innerHTML = `
-    <div class="ep-line" title="Click to open: ${escapeHtml(node.selection)}"></div>
-    <div class="ep-head">
-      <span class="ep-quote">💡 "${escapeHtml(node.selection)}"</span>
-      <span class="ep-badge" hidden></span>
-      <span class="ep-busy" hidden>●●●</span>
-      <button class="ep-btn ep-close" title="Close this window and its nested ones">✕</button>
-    </div>
-    <div class="explain-messages"></div>
-    <form class="ep-input-form">
-      <textarea class="ep-input" rows="1" placeholder="Ask a follow-up question..."></textarea>
-      <button type="submit" class="ep-send" title="Send">➤</button>
-    </form>`;
-  explainPanels.appendChild(el);
-  renderPanelMessages(node);
-  updateRowState(node);
-  return el;
-}
-
-function depthOf(node) {
-  let d = 0;
-  let n = node;
-  while (n.parentId && state.explains.nodes[n.parentId] && d < 20) {
-    n = state.explains.nodes[n.parentId];
-    d++;
-  }
-  return d;
-}
-
-/* Depth-first order: root, its descendants, next root — the visual stack. */
-function dfsOrder() {
-  const out = [];
-  const seen = new Set();
-  const visit = (id) => {
-    if (seen.has(id) || !state.explains.nodes[id]) return;
-    seen.add(id);
-    out.push(id);
-    for (const c of childrenOf(id)) visit(c.id);
-  };
-  for (const r of state.explains.roots) visit(r);
-  for (const id of Object.keys(state.explains.nodes)) if (!seen.has(id)) visit(id);
-  return out;
-}
-
-/* Reorder DOM rows into DFS order (elements are MOVED, never rebuilt, so
- * in-flight typewriter streams keep their message containers). */
-function reorderRows() {
-  const order = dfsOrder();
-  let first = true;
-  for (const id of order) {
-    const row = panelEl(id);
-    if (!row) continue;
-    if (first) {
-      if (row._handle) row._handle.remove();
-    } else {
-      if (!row._handle) {
-        row._handle = document.createElement('div');
-        row._handle.className = 'ep-resize';
-      }
-      explainPanels.appendChild(row._handle);
-    }
-    explainPanels.appendChild(row);
-    first = false;
-  }
-}
-
-const EP_MIN = 4; // collapsed line height in pixels
-
-/*
- * Height engine: 'auto' rows split the leftover space equally; pixel rows
- * (dragged or collapsed lines) are fixed. Collapsed = EP_MIN line.
- */
-function applyLayout() {
-  if (!state.sidebar.open) return;
-  const order = dfsOrder();
-  const rows = order.map(panelEl).filter(Boolean);
-  if (!rows.length) return;
-
-  const H = explainPanels.clientHeight || 600;
-  let pxSum = 0;
-  let autoCount = 0;
-  for (const id of order) {
-    const n = state.explains.nodes[id];
-    if (!n) continue;
-    if (n.h === 'auto') autoCount++;
-    else pxSum += typeof n.h === 'number' ? n.h : EP_MIN;
-  }
-  // Account for the resize handles between rows (5px each).
-  pxSum += Math.max(0, rows.length - 1) * 5;
-  const share = autoCount > 0 ? Math.max(160, (H - pxSum) / autoCount) : 0;
-
-  for (const row of rows) {
-    const n = state.explains.nodes[row.dataset.id];
-    if (!n) continue;
-    const h = n.h === 'auto' ? share : (typeof n.h === 'number' ? n.h : EP_MIN);
-    row.style.height = h + 'px';
-    row.classList.toggle('collapsed', h <= 8);
-    row.classList.toggle('active', state.explains.activeId === n.id);
-  }
-}
-
-function updateRowState(node) {
-  const row = panelEl(node.id);
-  if (!row) return;
-  const kids = childrenOf(node.id).length;
-  const badge = row.querySelector('.ep-badge');
-  badge.hidden = kids === 0;
-  badge.textContent = kids ? `${kids} nested` : '';
-  row.querySelector('.ep-busy').hidden = !node.busy;
-  const ta = row.querySelector('.ep-input');
-  const btn = row.querySelector('.ep-send');
-  ta.disabled = !!node.busy;
-  btn.disabled = !!node.busy;
-  row.querySelector('.ep-line').title = `Click to open: ${node.selection}`;
-}
-
-function updateRowStates() {
-  for (const n of Object.values(state.explains.nodes)) updateRowState(n);
-}
-
-/* Header button: shows how many windows exist and reopens the panel. */
-function updateExplainToggle() {
-  const count = Object.keys(state.explains.nodes).length;
-  explainsCount.textContent = String(count);
-  explainsToggle.classList.toggle('hidden', count === 0);
-  explainsToggle.classList.toggle('on', state.sidebar.open);
-}
-
-function renderPanelMessages(node) {
-  const el = panelEl(node.id);
-  if (!el) return;
-  const box = el.querySelector('.explain-messages');
-  box.innerHTML =
-    node.messages.map(messageHtml).join('') ||
-    '<div class="empty">The explanation will appear here.</div>';
-  scrollDown(box);
+function childPane(id) {
+  return explainPanels.querySelector(`.ex-pane[data-child="${id}"]`);
 }
 
 function activeNode() {
@@ -671,7 +559,83 @@ function truncateLabel(s, max = 26) {
   return s.length > max ? s.slice(0, max).trimEnd() + '…' : s;
 }
 
-/* ---------- rendering: tabs + row state ---------- */
+/* ---------- container DOM ---------- */
+
+function createPanelEl(node) {
+  const el = document.createElement('div');
+  el.className = 'ex-container';
+  el.dataset.id = node.id;
+  el.innerHTML = `
+    <div class="ex-head" title="${escapeHtml(node.selection)}">
+      <span class="ex-quote">💡 "${escapeHtml(node.selection)}"</span>
+      <span class="ex-badge" hidden></span>
+      <span class="ex-busy" hidden>●●●</span>
+      <button class="ex-btn ex-close" title="Close this container and its nested ones">✕</button>
+    </div>
+    <div class="ex-ctabs" hidden></div>
+    <div class="ex-split">
+      <div class="ex-pane ex-content">
+        <div class="explain-messages"></div>
+        <form class="ep-input-form">
+          <textarea class="ep-input" rows="1" placeholder="Ask a follow-up question..."></textarea>
+          <button type="submit" class="ep-send" title="Send">➤</button>
+        </form>
+      </div>
+    </div>`;
+  const content = el.querySelector('.ex-content');
+  content.style.flexGrow = String(typeof node.cw === 'number' ? node.cw : 1);
+  return el;
+}
+
+/*
+ * Mount a container: roots go straight into the mount; children get a flex
+ * pane + vertical divider inserted right AFTER the parent's content pane, so
+ * the newest child always sits next to the parent content:
+ *     [parent content] | [newest] | [older ...]
+ */
+function mountNode(node) {
+  const el = createPanelEl(node);
+  // Render content only once the element is findable in the DOM.
+  const done = () => {
+    renderPanelMessages(node);
+    updateRowState(node);
+    return el;
+  };
+  if (!node.parentId) {
+    explainPanels.appendChild(el);
+    return done();
+  }
+  const parentEl = panelEl(node.parentId);
+  if (!parentEl) {          // parent missing -> mount as root instead
+    explainPanels.appendChild(el);
+    return done();
+  }
+  const split = parentEl.querySelector(':scope > .ex-split');
+  const content = split.querySelector(':scope > .ex-content');
+  const ref = content.nextElementSibling;
+  const vdiv = document.createElement('div');
+  vdiv.className = 'ex-vdiv';
+  const pane = document.createElement('div');
+  pane.className = 'ex-pane ex-child';
+  pane.dataset.child = node.id;
+  pane.style.flexGrow = String(typeof node.w === 'number' ? node.w : 1.5);
+  pane.appendChild(el);
+  split.insertBefore(vdiv, ref);
+  split.insertBefore(pane, ref);
+  return done();
+}
+
+function renderPanelMessages(node) {
+  const el = panelEl(node.id);
+  if (!el) return;
+  const box = el.querySelector('.explain-messages');
+  box.innerHTML =
+    node.messages.map(messageHtml).join('') ||
+    '<div class="empty">The explanation will appear here.</div>';
+  scrollDown(box);
+}
+
+/* ---------- chrome: tabs, badges, visibility, collapsed lines ---------- */
 
 function renderExplainTabs() {
   const activeRoot = state.explains.activeId ? rootAncestorOf(state.explains.activeId) : null;
@@ -684,27 +648,157 @@ function renderExplainTabs() {
         <button class="explain-tab ${activeRoot && id === activeRoot.id ? 'active' : ''}" data-id="${id}" title="${escapeHtml(n.selection)}">
           <span class="tab-label">💡 ${escapeHtml(truncateLabel(n.selection))}</span>
           ${kids ? `<span class="tab-count">${kids}</span>` : ''}
-          <span class="tab-close" data-close="${id}" title="Close this window and its nested ones">✕</span>
+          <span class="tab-close" data-close="${id}" title="Close this container and its nested ones">✕</span>
         </button>`;
     })
     .join('');
 }
 
-/* Activate a window: it gets the standard space, every other panel collapses
- * to a few-pixel line (they can be clicked or dragged back open). */
-function activateExplain(id, persistIt = true) {
-  if (!state.explains.nodes[id]) return;
-  state.explains.activeId = id;
-  for (const n of Object.values(state.explains.nodes)) {
-    n.h = n.id === id ? 'auto' : EP_MIN;
+/* Per-container tab strip listing that container's children. */
+function renderChildTabs(parentId) {
+  const parentEl = panelEl(parentId);
+  if (!parentEl) return;
+  const box = parentEl.querySelector(':scope > .ex-ctabs');
+  if (!box) return;
+  const kids = childrenOf(parentId);
+  if (!kids.length) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
   }
-  renderExplainTabs();
-  updateExplainToggle();
-  applyLayout();
-  updateRowStates();
+  box.hidden = false;
+  box.innerHTML = kids
+    .map(
+      (c) => `
+      <button class="ex-tab ${state.explains.activeId === c.id ? 'active' : ''}" data-id="${c.id}" title="${escapeHtml(c.selection)}">
+        <span class="tab-label">💡 ${escapeHtml(truncateLabel(c.selection, 18))}</span>
+        <span class="tab-close" data-close="${c.id}" title="Close this container">✕</span>
+      </button>`
+    )
+    .join('');
+}
+
+function renderAllChildTabs() {
+  for (const id of Object.keys(state.explains.nodes)) renderChildTabs(id);
+}
+
+function updateRowState(node) {
+  const el = panelEl(node.id);
+  if (!el) return;
+  const kids = childrenOf(node.id).length;
+  const badge = el.querySelector('.ex-badge');
+  badge.hidden = kids === 0;
+  badge.textContent = kids ? `${kids} nested` : '';
+  el.querySelector('.ex-busy').hidden = !node.busy;
+  const ta = el.querySelector('.ep-input');
+  const btn = el.querySelector('.ep-send');
+  ta.disabled = !!node.busy;
+  btn.disabled = !!node.busy;
+}
+
+function updateRowStates() {
+  for (const n of Object.values(state.explains.nodes)) updateRowState(n);
+}
+
+/* Header button: shows how many containers exist and reopens the panel. */
+function updateExplainToggle() {
+  const count = Object.keys(state.explains.nodes).length;
+  explainsCount.textContent = String(count);
+  explainsToggle.classList.toggle('hidden', count === 0);
+  explainsToggle.classList.toggle('on', state.sidebar.open);
+}
+
+function activeRootId() {
+  if (state.explains.activeId) {
+    const r = rootAncestorOf(state.explains.activeId);
+    if (r) return r.id;
+  }
+  return state.explains.roots[0] || null;
+}
+
+/* Only the active root's tree is displayed. */
+function updateRootVisibility() {
+  const rootId = activeRootId();
+  for (const el of explainPanels.children) {
+    if (!el.classList || !el.classList.contains('ex-container')) continue;
+    el.classList.toggle('active-root', el.dataset.id === rootId);
+  }
+}
+
+/*
+ * Collapsed = pane squeezed to a few pixels -> content hidden, thin line shown.
+ * Measured from real widths (flex handles the distribution).
+ */
+function updateCollapsed() {
+  const open = state.sidebar.open;
+  for (const pane of explainPanels.querySelectorAll('.ex-pane')) {
+    // Only judge panes whose split row is actually laid out — measuring
+    // mid-transition would wrongly collapse a wide pane (hidden content).
+    const split = pane.parentElement;
+    const valid = open && split && split.clientWidth > 0;
+    pane.classList.toggle('collapsed', valid && pane.clientWidth <= 10);
+  }
+  chatArea.classList.toggle('collapsed', chatArea.clientWidth <= 10);
+}
+
+let collapsedRaf = 0;
+let collapsedTimer = 0;
+function updateCollapsedSoon() {
+  if (!collapsedRaf) {
+    collapsedRaf = requestAnimationFrame(() => {
+      collapsedRaf = 0;
+      updateCollapsed();
+    });
+  }
+  // The sidebar width animates (0.15s) — re-measure once it has settled so a
+  // pane opened during the transition isn't stuck in the collapsed state.
+  clearTimeout(collapsedTimer);
+  collapsedTimer = setTimeout(updateCollapsed, 220);
+}
+
+/* ---------- pane weights (flex-grow) ---------- */
+
+function paneGrow(pane) {
+  const v = parseFloat(pane.style.flexGrow);
+  return Number.isFinite(v) && v > 0 ? v : 1;
+}
+
+function setPaneGrow(pane, w) {
+  pane.style.flexGrow = String(w);
+  if (pane.classList.contains('ex-child')) {
+    const n = state.explains.nodes[pane.dataset.child];
+    if (n) n.w = w;
+  } else {
+    const c = pane.closest('.ex-container');
+    const n = c && state.explains.nodes[c.dataset.id];
+    if (n) n.cw = w;
+  }
+}
+
+/* Expand a squeezed pane back to a usable share. */
+function expandPane(pane) {
+  if (!pane) return;
+  if (paneGrow(pane) < 0.5) setPaneGrow(pane, pane.classList.contains('ex-child') ? 1.5 : 1);
+}
+
+/* ---------- activate / show / hide ---------- */
+
+/* Activating a container: root tree shown, its pane brought back if squeezed,
+ * tabs refreshed, scrolled into view. */
+function activateExplain(id, persistIt = true) {
+  const node = state.explains.nodes[id];
+  if (!node) return;
+  state.explains.activeId = id;
+  expandPane(childPane(id));
   const el = panelEl(id);
+  if (el) expandPane(el.querySelector(':scope > .ex-split > .ex-content'));
+  renderExplainTabs();
+  renderAllChildTabs();
+  updateRootVisibility();
+  updateExplainToggle();
+  updateCollapsedSoon();
   if (el) {
-    el.scrollIntoView({ block: 'nearest' });
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     scrollDown(el.querySelector('.explain-messages'));
   }
   if (persistIt) persist();
@@ -715,11 +809,10 @@ function showSidebar() {
   rightSidebar.classList.add('open');
   rightSidebar.style.width = `${state.sidebar.width}px`;
   updateExplainToggle();
-  applyLayout();
+  updateCollapsedSoon();
 }
 
-/* Hide the panel but KEEP every window — reopen via the header button or a
- * new Explain. */
+/* Hide the panel but KEEP every container — reopen via the header button. */
 function hideExplainPanel() {
   state.sidebar.open = false;
   rightSidebar.classList.remove('open');
@@ -727,7 +820,7 @@ function hideExplainPanel() {
   updateExplainToggle();
 }
 
-/* ---------- streaming into a window ---------- */
+/* ---------- streaming into a container ---------- */
 
 function explainApiMessages(node) {
   return [
@@ -739,7 +832,7 @@ function explainApiMessages(node) {
 
 function finishExplainStream(node, streamId, full) {
   if (streamId !== node.streamId) return;             // stale stream
-  if (state.explains.nodes[node.id] !== node) return; // window was closed
+  if (state.explains.nodes[node.id] !== node) return; // container was closed
   node.busy = false;
   node.controller = null;
   if (full && full.trim()) {
@@ -771,7 +864,7 @@ function startExplainStream(node) {
   streamChat(explainApiMessages(node), streamer, controller.signal);
 }
 
-/* ---------- window lifecycle ---------- */
+/* ---------- container lifecycle ---------- */
 
 function createExplainWindow(selection, parentId = null) {
   const parent = parentId ? state.explains.nodes[parentId] : null;
@@ -788,16 +881,24 @@ function createExplainWindow(selection, parentId = null) {
     streamId: 0,
     controller: null,
     createdAt: Date.now(),
-    h: 'auto',
+    w: 1.5,   // share inside the parent's split (children start bigger)
+    cw: 1,    // the container's own content-pane share
   };
 
   state.explains.nodes[id] = node;
   if (effectiveParent === null) state.explains.roots.push(id);
 
-  createPanelEl(node);
-  reorderRows(); // place the row inside its parent's block (DFS order)
-  showSidebar(); // never replaces existing windows
+  mountNode(node);
+  if (effectiveParent) {
+    renderChildTabs(effectiveParent);
+    updateRowState(state.explains.nodes[effectiveParent]);
+  } else {
+    renderExplainTabs();
+  }
+
+  showSidebar(); // never replaces existing containers
   activateExplain(id);
+  updateCollapsedSoon();
   startExplainStream(node);
 }
 
@@ -805,6 +906,7 @@ function closeExplainWindow(id) {
   const node = state.explains.nodes[id];
   if (!node) return;
 
+  const parentId = node.parentId;
   const doomed = subtreeIds(id);
   const activeDoomed = doomed.includes(state.explains.activeId);
 
@@ -813,31 +915,42 @@ function closeExplainWindow(id) {
     const n = state.explains.nodes[did];
     if (n && n.controller) n.controller.abort();
     delete state.explains.nodes[did];
-    const el = panelEl(did);
-    if (el) {
-      if (el._handle) el._handle.remove();
-      el.remove();
+  }
+
+  if (!parentId) {
+    const rootEl = panelEl(id);
+    if (rootEl) rootEl.remove();
+    state.explains.roots = state.explains.roots.filter((r) => r !== id);
+  } else {
+    const pane = childPane(id);
+    if (pane) {
+      const vdiv = pane.previousElementSibling; // this pane's divider
+      if (vdiv && vdiv.classList.contains('ex-vdiv')) vdiv.remove();
+      pane.remove();
     }
   }
-  state.explains.roots = state.explains.roots.filter((r) => !doomed.includes(r));
 
   if (state.explains.roots.length === 0) {
     state.explains.activeId = null;
     hideExplainPanel();
   } else if (activeDoomed) {
     const fallback =
-      node.parentId && state.explains.nodes[node.parentId]
-        ? node.parentId
+      parentId && state.explains.nodes[parentId]
+        ? parentId
         : state.explains.roots[state.explains.roots.length - 1];
     state.explains.activeId = null; // force activateExplain to run
     activateExplain(fallback);
   }
 
-  reorderRows();
+  if (parentId && state.explains.nodes[parentId]) {
+    renderChildTabs(parentId);
+    updateRowState(state.explains.nodes[parentId]);
+  }
   renderExplainTabs();
+  renderAllChildTabs();
+  updateRootVisibility();
   updateExplainToggle();
-  updateRowStates();
-  applyLayout();
+  updateCollapsedSoon();
   persist();
 }
 
@@ -855,7 +968,7 @@ function clearExplainWindows() {
   updateExplainToggle();
 }
 
-/* Rebuild windows from a conversation's saved snapshot (no streaming). */
+/* Rebuild containers from a conversation's saved snapshot (no streaming). */
 function restoreExplainWindows(snapshot) {
   if (!snapshot || !snapshot.nodes) return;
 
@@ -863,8 +976,9 @@ function restoreExplainWindows(snapshot) {
   if (!saved.length) return;
 
   for (const s of saved.sort((a, b) => a.createdAt - b.createdAt)) {
-    // Orphans (parent lost) are promoted to roots.
-    const parentId = s.parentId && snapshot.nodes[s.parentId] ? s.parentId : null;
+    // Orphans (parent lost or not mounted) are promoted to roots.
+    const parentId =
+      s.parentId && snapshot.nodes[s.parentId] && panelEl(s.parentId) ? s.parentId : null;
     const node = {
       id: s.id,
       parentId,
@@ -875,11 +989,12 @@ function restoreExplainWindows(snapshot) {
       streamId: 0,
       controller: null,
       createdAt: s.createdAt || Date.now(),
-      h: s.h === 'auto' || typeof s.h === 'number' ? s.h : EP_MIN,
+      w: typeof s.w === 'number' ? s.w : 1.5,
+      cw: typeof s.cw === 'number' ? s.cw : 1,
     };
     state.explains.nodes[node.id] = node;
     if (parentId === null) state.explains.roots.push(node.id);
-    createPanelEl(node);
+    mountNode(node);
   }
 
   // Keep only roots that still exist, preserving saved order.
@@ -889,28 +1004,22 @@ function restoreExplainWindows(snapshot) {
 
   if (roots.length === 0) return;
 
-  reorderRows();
-
-  // Restore layout: active window expanded, saved heights for the rest.
   const activeValid = snapshot.activeId && state.explains.nodes[snapshot.activeId];
-  const activeId = activeValid ? snapshot.activeId : roots[0];
-  state.explains.activeId = activeId;
-  for (const n of Object.values(state.explains.nodes)) {
-    if (n.id === activeId) n.h = 'auto';
-    else if (!(n.h === 'auto' || typeof n.h === 'number')) n.h = EP_MIN;
-  }
+  state.explains.activeId = activeValid ? snapshot.activeId : roots[0];
 
   showSidebar();
   renderExplainTabs();
+  renderAllChildTabs();
+  updateRootVisibility();
   updateExplainToggle();
-  applyLayout();
   updateRowStates();
+  updateCollapsedSoon();
   persist();
 }
 
-function sendExplain(row) {
-  const node = state.explains.nodes[row.dataset.id];
-  const ta = row.querySelector('.ep-input');
+function sendExplain(container) {
+  const node = state.explains.nodes[container.dataset.id];
+  const ta = container.querySelector('.ep-input');
   const text = ta.value.trim();
   if (!node || node.busy || !text) return;
   ta.value = '';
@@ -918,7 +1027,7 @@ function sendExplain(row) {
 
   node.messages.push({ role: 'user', content: text });
   renderPanelMessages(node);
-  scrollDown(row.querySelector('.explain-messages'));
+  scrollDown(container.querySelector('.explain-messages'));
   startExplainStream(node);
 }
 
@@ -971,7 +1080,7 @@ makeSelectionHandlers(messagesEl, () => '');
 /* Selections inside an explain window create a CHILD of that window. */
 makeSelectionHandlers(explainPanels, (anchor) => {
   const el = anchor.nodeType === 1 ? anchor : anchor.parentElement;
-  const panel = el && el.closest('.explain-panel');
+  const panel = el && el.closest('.ex-container');
   return panel ? panel.dataset.id : '';
 });
 
@@ -986,26 +1095,64 @@ document.addEventListener('mousedown', (e) => {
   if (!popup.contains(e.target)) hidePopup();
 });
 
-/* ================= Resize handle ================= */
+/* ================= Main chat | explainer resize ================= */
+/*
+ * The explainer can grow until the main conversation is only a few pixels
+ * wide (a line). Double-click the divider — or click the collapsed chat line —
+ * to snap between full width and the remembered normal width.
+ */
+
+const RESIZE_MIN = 240; // the explainer's own minimum width
+
+function explainerMaxWidth() {
+  return Math.max(RESIZE_MIN + 40, window.innerWidth - 12); // leaves ~7px for the chat line
+}
+
+function setExplainerWidth(w) {
+  state.sidebar.width = w;
+  rightSidebar.style.width = `${w}px`;
+  updateCollapsedSoon();
+}
+
+function toggleMainChat() {
+  const isCollapsed = state.sidebar.width >= explainerMaxWidth() - 2;
+  if (isCollapsed) {
+    setExplainerWidth(state.sidebar.prevWidth || 380);
+  } else {
+    state.sidebar.prevWidth = state.sidebar.width;
+    setExplainerWidth(explainerMaxWidth());
+  }
+}
 
 resizeHandle.addEventListener('mousedown', (e) => {
   e.preventDefault();
   resizeHandle.classList.add('dragging');
   const startX = e.clientX;
   const startW = state.sidebar.width;
+  // Remember a normal width so the collapsed chat line can be restored later.
+  if (startW < explainerMaxWidth() - 120) state.sidebar.prevWidth = startW;
 
   function onMove(ev) {
-    const w = Math.min(650, Math.max(280, startW + (startX - ev.clientX)));
+    const w = Math.min(explainerMaxWidth(), Math.max(RESIZE_MIN, startW + (startX - ev.clientX)));
     state.sidebar.width = w;
     rightSidebar.style.width = `${w}px`;
+    updateCollapsedSoon();
   }
   function onUp() {
     resizeHandle.classList.remove('dragging');
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
+    updateCollapsed();
   }
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
+});
+
+resizeHandle.addEventListener('dblclick', toggleMainChat);
+
+/* Click the collapsed main-chat line to bring it back. */
+chatArea.addEventListener('click', () => {
+  if (chatArea.classList.contains('collapsed')) toggleMainChat();
 });
 
 /* ================= Left sidebar toggle ================= */
@@ -1051,92 +1198,133 @@ input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
-/* ---------- Explain panel: delegated interactions ---------- */
+/* ---------- Explainer container interactions (delegated) ---------- */
 
-/* Per-row input: submit / Enter. */
+/* Per-container input: submit / Enter. */
 explainPanels.addEventListener('submit', (e) => {
   const form = e.target.closest('.ep-input-form');
   if (!form) return;
   e.preventDefault();
-  sendExplain(form.closest('.explain-panel'));
+  sendExplain(form.closest('.ex-container'));
 });
 explainPanels.addEventListener('keydown', (e) => {
   if (!e.target.classList || !e.target.classList.contains('ep-input')) return;
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    sendExplain(e.target.closest('.explain-panel'));
+    sendExplain(e.target.closest('.ex-container'));
   }
 });
 explainPanels.addEventListener('input', (e) => {
   if (e.target.classList && e.target.classList.contains('ep-input')) autoResize(e.target);
 });
 
-/* Click a collapsed line or a header to activate a window; ✕ closes it. */
+/* Child tabs (activate / close), header ✕ (close), collapsed pane (expand),
+ * header click (activate). */
 explainPanels.addEventListener('click', (e) => {
-  const close = e.target.closest('.ep-close');
-  if (close) {
+  const tabClose = e.target.closest('.ex-tab .tab-close');
+  if (tabClose) {
     e.stopPropagation();
-    closeExplainWindow(close.closest('.explain-panel').dataset.id);
+    closeExplainWindow(tabClose.dataset.close);
     return;
   }
-  const row = e.target.closest('.explain-panel');
-  if (row && (e.target.closest('.ep-line') || e.target.closest('.ep-head'))) {
-    activateExplain(row.dataset.id);
+  const tab = e.target.closest('.ex-tab');
+  if (tab) {
+    activateExplain(tab.dataset.id);
+    return;
+  }
+  const close = e.target.closest('.ex-close');
+  if (close) {
+    e.stopPropagation();
+    closeExplainWindow(close.closest('.ex-container').dataset.id);
+    return;
+  }
+  const pane = e.target.closest('.ex-pane.collapsed');
+  if (pane) {
+    if (pane.classList.contains('ex-child')) activateExplain(pane.dataset.child);
+    else {
+      const c = pane.closest('.ex-container');
+      if (c) activateExplain(c.dataset.id);
+    }
+    return;
+  }
+  const head = e.target.closest('.ex-head');
+  if (head) {
+    const c = head.closest('.ex-container');
+    if (c) activateExplain(c.dataset.id);
   }
 });
 
-/* Drag the handle between two rows to resize them (min = few-pixel line). */
+/* Drag a vertical divider: the two adjacent panes resize (min = few pixels). */
 explainPanels.addEventListener('mousedown', (e) => {
-  const handle = e.target.closest('.ep-resize');
-  if (!handle) return;
+  const vd = e.target.closest('.ex-vdiv');
+  if (!vd) return;
   e.preventDefault();
-  handle.classList.add('dragging');
+  const a = vd.previousElementSibling;
+  const b = vd.nextElementSibling;
+  if (!a || !b || !a.classList.contains('ex-pane') || !b.classList.contains('ex-pane')) return;
+  vd.classList.add('dragging');
 
-  const rows = dfsOrder().map(panelEl).filter(Boolean);
-  const belowRow = handle.nextElementSibling;
-  const aboveRow = handle.previousElementSibling;
-  if (!belowRow || !aboveRow || !belowRow.classList.contains('explain-panel') ||
-      !aboveRow.classList.contains('explain-panel')) {
-    handle.classList.remove('dragging');
-    return;
-  }
-
-  const aNode = state.explains.nodes[aboveRow.dataset.id];
-  const bNode = state.explains.nodes[belowRow.dataset.id];
-  if (!aNode || !bNode) { handle.classList.remove('dragging'); return; }
-
-  const a0 = aboveRow.offsetHeight;
-  const b0 = belowRow.offsetHeight;
-  aNode.h = a0; // freeze 'auto' rows to pixels for the drag
-  bNode.h = b0;
+  const a0 = a.clientWidth;
+  const b0 = b.clientWidth;
   const total = a0 + b0;
-  const startY = e.clientY;
+  const aW0 = paneGrow(a);
+  const bW0 = paneGrow(b);
+  const startX = e.clientX;
 
   const onMove = (ev) => {
-    const dy = ev.clientY - startY;
-    // Drag up => above shrinks, below grows (and vice versa).
-    const b = Math.min(total - EP_MIN, Math.max(EP_MIN, b0 - dy));
-    bNode.h = total - b > EP_MIN ? b : total - EP_MIN;
-    aNode.h = total - bNode.h;
-    applyLayout();
+    const dx = ev.clientX - startX;
+    const a1 = Math.max(4, Math.min(total - 4, a0 + dx));
+    const b1 = total - a1;
+    const sumW = aW0 + bW0;
+    setPaneGrow(a, (a1 / total) * sumW);
+    setPaneGrow(b, (b1 / total) * sumW);
+    updateCollapsedSoon();
   };
   const onUp = () => {
-    handle.classList.remove('dragging');
+    vd.classList.remove('dragging');
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
+    updateCollapsed();
     persist();
   };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
 });
 
-/* Header button: show/hide the explain panel without touching the windows. */
+/* Header button: show/hide the explain panel without touching the containers. */
 explainsToggle.addEventListener('click', () => {
   if (state.sidebar.open) hideExplainPanel();
   else showSidebar();
 });
 
-window.addEventListener('resize', () => applyLayout());
+/* ---------- Topics summary overlay ---------- */
+
+summaryBtn.addEventListener('click', () => {
+  const panelHidden = !state.sidebar.open;
+  const overlayHidden = summaryOverlay.classList.contains('hidden');
+  if (panelHidden || overlayHidden) {
+    summaryOverlay.classList.remove('hidden');
+    if (panelHidden) showSidebar(); // overlay lives over the containers
+    showCachedSummary();
+    runSummary(state.currentId, state.messages, explainSnapshot(), false);
+  } else {
+    summaryOverlay.classList.add('hidden'); // close -> containers visible again
+  }
+});
+summaryClose.addEventListener('click', () => summaryOverlay.classList.add('hidden'));
+summaryRefresh.addEventListener('click', () => {
+  renderSummary(summaryCache[state.currentId], 'summarizing…');
+  runSummary(state.currentId, state.messages, explainSnapshot(), true);
+});
+
+window.addEventListener('resize', () => {
+  const max = explainerMaxWidth();
+  if (state.sidebar.open && state.sidebar.width > max) {
+    state.sidebar.width = max;
+    rightSidebar.style.width = `${max}px`;
+  }
+  updateCollapsedSoon();
+});
 
 newChatBtn.addEventListener('click', async () => {
   if (state.streaming) return;
@@ -1178,6 +1366,193 @@ explainTabs.addEventListener('click', (e) => {
   if (tab) activateExplain(tab.dataset.id);
 });
 
+/* ================= Topics summary (background job) ================= */
+/*
+ * A one-liner + bullet points of the whole session (main chat + every
+ * explainer container): what was asked and what was learned/achieved.
+ * - Cached per conversation; opening a conversation shows the cache instantly
+ *   and refreshes it in the background.
+ * - Also refreshed when leaving a conversation, or manually via ↻.
+ * - Shown as an overlay over the explainer containers; ✕ closes it.
+ */
+
+const summaryCache = {}; // convId -> { headline, points, fingerprint, at }
+const summaryState = { inflight: null, queue: null, controller: null };
+
+function fingerprintOf(messages, explains) {
+  const nodes = (explains && explains.nodes) || {};
+  let n = messages.length;
+  let chars = 0;
+  for (const m of messages) chars += (m.content || '').length;
+  for (const nd of Object.values(nodes)) {
+    n += 1 + (nd.messages || []).length;
+    chars += (nd.selection || '').length;
+    for (const m of nd.messages || []) chars += (m.content || '').length;
+  }
+  return `${n}:${chars}`;
+}
+
+const SUMMARY_SYS = [
+  'You summarize a learning session for the student to glance at later.',
+  'Output EXACTLY this format and nothing else:',
+  'Line 1: one single sentence summarizing what the student is learning and has achieved so far.',
+  'Then 3 to 10 bullet points, one per line, each starting with "- ", naming concrete topics that were asked about and learned (question -> what was learned).',
+  'Plain short lines. No preamble, no closing remarks, no markdown headings.',
+].join('\n');
+
+function summaryPromptInput(messages, explains) {
+  const clip = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
+  const out = [];
+  const main = cleanHistory(messages || []);
+  if (main.length) {
+    out.push('MAIN CONVERSATION:');
+    for (const m of main.slice(-30)) {
+      out.push(`${m.role === 'user' ? 'Student' : 'Tutor'}: ${clip(m.content, 400)}`);
+    }
+    out.push('');
+  }
+  const nodes = (explains && explains.nodes) || {};
+  const roots = (explains && explains.roots) || [];
+  const seen = new Set();
+  const emit = (id, depth) => {
+    if (seen.has(id) || !nodes[id]) return;
+    seen.add(id);
+    const nd = nodes[id];
+    out.push(`${depth ? 'NESTED EXPLAINER' : 'EXPLAINER'} — selected: "${clip(nd.selection || '', 200)}"`);
+    for (const m of cleanHistory(nd.messages || []).slice(-12)) {
+      out.push(`  ${m.role === 'user' ? 'Student' : 'Tutor'}: ${clip(m.content, 300)}`);
+    }
+    out.push('');
+    for (const c of Object.values(nodes)
+      .filter((x) => x.parentId === id)
+      .sort((a, b) => a.createdAt - b.createdAt)) {
+      emit(c.id, depth + 1);
+    }
+  };
+  for (const r of roots) emit(r, 0);
+  for (const id of Object.keys(nodes)) if (!seen.has(id)) emit(id, 0);
+  return out.join('\n');
+}
+
+function parseSummary(text) {
+  const lines = (text || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  let headline = '';
+  const points = [];
+  for (const l of lines) {
+    if (/^[-*•]\s+/.test(l)) {
+      points.push(l.replace(/^[-*•]\s+/, '').replace(/\*\*/g, '').trim());
+    } else if (!headline) {
+      headline = l
+        .replace(/^#+\s*/, '')
+        .replace(/\*\*/g, '')
+        .replace(/^["'“”]+|["'“”]+$/g, '')
+        .trim();
+    } else {
+      points.push(l.replace(/\*\*/g, '').trim());
+    }
+  }
+  return { headline: headline || 'Learning session', points };
+}
+
+function renderSummary(entry, status) {
+  summaryStatus.textContent = status || '';
+  if (!entry || (!entry.headline && !(entry.points || []).length)) {
+    summaryBody.innerHTML = `<div class="summary-empty">No summary yet.${
+      state.messages.length || Object.keys(state.explains.nodes).length
+        ? ' Press ↻ to generate one.'
+        : ' Chat or explain something first.'
+    }</div>`;
+    return;
+  }
+  summaryBody.innerHTML = `
+    <div class="summary-headline">${escapeHtml(entry.headline)}</div>
+    <ul class="summary-points">${(entry.points || [])
+      .map((p) => `<li>${escapeHtml(p)}</li>`)
+      .join('')}</ul>`;
+}
+
+function showCachedSummary() {
+  const busy = summaryState.inflight === state.currentId;
+  renderSummary(summaryCache[state.currentId], busy ? 'updating…' : '');
+}
+
+/* Single-flight: a request arriving while one runs is queued (latest wins). */
+function runSummary(convId, messages, explains, force = false) {
+  if (!convId) return;
+  const fp = fingerprintOf(messages, explains);
+  const cached = summaryCache[convId];
+  if (!force && cached && cached.fingerprint === fp) return; // already fresh
+  if (
+    messages.length === 0 &&
+    Object.keys((explains && explains.nodes) || {}).length === 0
+  ) {
+    return; // nothing to summarize
+  }
+  if (summaryState.inflight) {
+    summaryState.queue = { convId, messages, explains, force };
+    return;
+  }
+
+  summaryState.inflight = convId;
+  summaryState.controller = new AbortController();
+  const isCurrent = () => convId === state.currentId;
+  if (isCurrent()) renderSummary(summaryCache[convId], 'summarizing…');
+
+  let buf = '';
+  let finished = false;
+  const collector = {
+    start() {},
+    push(t) {
+      buf += t;
+    },
+    end() {
+      finish(buf);
+    },
+  };
+
+  function finish(text) {
+    if (finished) return;
+    finished = true;
+    summaryState.inflight = null;
+    summaryState.controller = null;
+    const queue = summaryState.queue;
+    summaryState.queue = null;
+
+    if (text && text.trim() && !text.trim().startsWith('⚠️')) {
+      const parsed = parseSummary(text);
+      const entry = {
+        headline: parsed.headline,
+        points: parsed.points,
+        fingerprint: fp,
+        at: Date.now(),
+      };
+      summaryCache[convId] = entry;
+      fetch(`/api/conversations/${convId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ summary: entry }),
+      }).catch(() => {});
+      if (isCurrent()) renderSummary(entry, '');
+    } else if (isCurrent()) {
+      renderSummary(summaryCache[convId], text ? 'failed — press ↻ to retry' : '');
+    }
+
+    if (queue) runSummary(queue.convId, queue.messages, queue.explains, queue.force);
+  }
+
+  streamChat(
+    [
+      { role: 'system', content: SUMMARY_SYS },
+      { role: 'user', content: summaryPromptInput(messages, explains) },
+    ],
+    collector,
+    summaryState.controller.signal
+  );
+}
+
 /* ================= Init ================= */
 
 async function init() {
@@ -1188,6 +1563,7 @@ async function init() {
   } else {
     renderMessages();
   }
+  updateCollapsed();
   input.focus();
 }
 

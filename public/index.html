@@ -24,6 +24,7 @@
         <button id="left-toggle" title="Toggle conversation list">☰</button>
         <span id="current-title">New conversation</span>
         <button id="explains-toggle" class="hidden" title="Show explain windows">💡 Explains <span id="explains-count">0</span></button>
+        <button id="summary-btn" title="Topics summary of this conversation">📋 Summary</button>
         <select id="model-select" title="Model"></select>
       </div>
 
@@ -38,16 +39,27 @@
     <!-- Drag handle to resize the explain sidebar -->
     <div id="resize-handle"></div>
 
-    <!-- Right sidebar: explain windows (nested resizable panels) -->
+    <!-- Right sidebar: explainer containers (recursive vertical splits) -->
     <aside id="right-sidebar">
       <div id="sidebar-header">
-        <div id="explain-tabs" title="Explain windows (created from the main chat)"></div>
+        <div id="explain-tabs" title="Root explainer containers (created from the main chat)"></div>
         <div class="sidebar-actions">
-          <button id="sidebar-reset" title="Clear this window's conversation">↺</button>
-          <button id="sidebar-close" title="Hide panel (windows are kept)">✕</button>
+          <button id="sidebar-reset" title="Clear this container's conversation">↺</button>
+          <button id="sidebar-close" title="Hide panel (containers are kept)">✕</button>
         </div>
       </div>
-      <div id="explain-panels"></div>
+      <div id="explainer-body">
+        <div id="explain-panels"></div>
+        <div id="summary-overlay" class="hidden">
+          <div class="summary-head">
+            <span class="summary-title">📋 Topics — what I've learned</span>
+            <span id="summary-status"></span>
+            <button id="summary-refresh" title="Regenerate now">↻</button>
+            <button id="summary-close" title="Close (containers stay)" class="summary-x">✕</button>
+          </div>
+          <div id="summary-body"></div>
+        </div>
+      </div>
     </aside>
 
   </div>

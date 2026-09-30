@@ -63,10 +63,15 @@ app.put('/api/conversations/:id', (req, res) => {
   const list = loadConversations();
   const conv = list.find((c) => c.id === req.params.id);
   if (!conv) return res.status(404).json({ error: 'Not found' });
-  conv.messages = Array.isArray(req.body.messages) ? req.body.messages : [];
-  // Snapshot of explain windows (tree of sessions) for this conversation.
+  // Partial updates: only overwrite the fields the client sends.
+  if ('messages' in req.body) {
+    conv.messages = Array.isArray(req.body.messages) ? req.body.messages : [];
+  }
+  // Snapshot of explainer containers (tree of split panes).
   if ('explains' in req.body) conv.explains = req.body.explains || null;
-  conv.updatedAt = Date.now();
+  // Topics summary (generated in the background).
+  if ('summary' in req.body) conv.summary = req.body.summary || null;
+  if ('messages' in req.body || 'explains' in req.body) conv.updatedAt = Date.now();
   const firstUser = conv.messages.find((m) => m.role === 'user');
   if (firstUser && (!conv.title || conv.title === 'New conversation')) {
     conv.title = firstUser.content.slice(0, 40);
