@@ -274,6 +274,7 @@ function renderMessages() {
   messagesEl.innerHTML =
     state.messages.map(messageHtml).join('') ||
     '<div class="empty">👋 Start learning! Ask me anything.<br><br>Tip: select or double-click any text to get an explanation in a side panel.</div>';
+  highlightSources(messagesEl, null); // highlight text that has explanations
   scrollDown(messagesEl);
 }
 
@@ -632,6 +633,7 @@ function renderPanelMessages(node) {
   box.innerHTML =
     node.messages.map(messageHtml).join('') ||
     '<div class="empty">The explanation will appear here.</div>';
+  highlightSources(box, node.id); // nested selections made in this container
   scrollDown(box);
 }
 
@@ -889,6 +891,8 @@ function createExplainWindow(selection, parentId = null) {
   if (effectiveParent === null) state.explains.roots.push(id);
 
   mountNode(node);
+  // The new container's selection must light up where it was taken from.
+  highlightSources(effectiveParent ? boxOf(effectiveParent) : messagesEl, effectiveParent);
   if (effectiveParent) {
     renderChildTabs(effectiveParent);
     updateRowState(state.explains.nodes[effectiveParent]);
@@ -951,6 +955,7 @@ function closeExplainWindow(id) {
   updateRootVisibility();
   updateExplainToggle();
   updateCollapsedSoon();
+  refreshAllHighlights(); // closed windows lose their highlight
   persist();
 }
 
@@ -1014,6 +1019,7 @@ function restoreExplainWindows(snapshot) {
   updateExplainToggle();
   updateRowStates();
   updateCollapsedSoon();
+  refreshAllHighlights();
   persist();
 }
 
@@ -1179,11 +1185,19 @@ async function loadModels() {
   } catch {
     modelSelect.innerHTML = `<option value="${state.model}">${state.model}</option>`;
   }
+  updateModelWrapTitle();
 }
 
 modelSelect.addEventListener('change', () => {
   state.model = modelSelect.value;
+  updateModelWrapTitle();
 });
+
+/* Tooltip showing the current model (useful when the select is icon-only). */
+function updateModelWrapTitle() {
+  const wrap = $('model-wrap');
+  if (wrap) wrap.title = `Model: ${state.model}`;
+}
 
 /* ================= Input helpers ================= */
 
@@ -1221,6 +1235,12 @@ explainPanels.addEventListener('input', (e) => {
 /* Child tabs (activate / close), header ✕ (close), collapsed pane (expand),
  * header click (activate). */
 explainPanels.addEventListener('click', (e) => {
+  // Highlighted source text (nested selections made inside this container)
+  const mark = e.target.closest('mark.explain-src');
+  if (mark && mark.dataset.id) {
+    focusExplainFromMark(mark.dataset.id);
+    return;
+  }
   const tabClose = e.target.closest('.ex-tab .tab-close');
   if (tabClose) {
     e.stopPropagation();
@@ -1291,6 +1311,12 @@ explainPanels.addEventListener('mousedown', (e) => {
   document.addEventListener('mouseup', onUp);
 });
 
+/* Clicking highlighted source text focuses its explainer container. */
+messagesEl.addEventListener('click', (e) => {
+  const mark = e.target.closest('mark.explain-src');
+  if (mark && mark.dataset.id) focusExplainFromMark(mark.dataset.id);
+});
+
 /* Header button: show/hide the explain panel without touching the containers. */
 explainsToggle.addEventListener('click', () => {
   if (state.sidebar.open) hideExplainPanel();
@@ -1317,12 +1343,18 @@ summaryRefresh.addEventListener('click', () => {
   runSummary(state.currentId, state.messages, explainSnapshot(), true);
 });
 
+/* Toolbar collapses to icons when the window itself gets narrow. */
+function updateToolbarDensity() {
+  document.body.classList.toggle('compact-header', window.innerWidth < 640);
+}
+
 window.addEventListener('resize', () => {
   const max = explainerMaxWidth();
   if (state.sidebar.open && state.sidebar.width > max) {
     state.sidebar.width = max;
     rightSidebar.style.width = `${max}px`;
   }
+  updateToolbarDensity();
   updateCollapsedSoon();
 });
 
@@ -1365,6 +1397,133 @@ explainTabs.addEventListener('click', (e) => {
   const tab = e.target.closest('.explain-tab');
   if (tab) activateExplain(tab.dataset.id);
 });
+
+/* ================= Source-text highlighting ================= */
+/*
+ * Text that has an explanation gets highlighted in its origin — the main
+ * chat for root containers, the parent container for nested ones.
+ * Clicking a highlight instantly focuses (and widens) that container.
+ */
+
+function boxOf(id) {
+  const el = panelEl(id);
+  return el ? el.querySelector('.explain-messages') : null;
+}
+
+/* Rebuild every highlight for the nodes whose selection origin is originId.
+ * originId === null -> main chat. */
+function highlightSources(box, originId) {
+  if (!box) return;
+  // Unwrap previous marks — rebuild from scratch (simple and safe).
+  box.querySelectorAll('mark.explain-src').forEach((m) => {
+    const parent = m.parentNode;
+    if (!parent) return;
+    while (m.firstChild) parent.insertBefore(m.firstChild, m);
+    parent.removeChild(m);
+    parent.normalize(); // merge split text nodes back together
+  });
+  const targets = Object.values(state.explains.nodes)
+    .filter((n) => (n.parentId || null) === (originId || null))
+    .filter((n) => n.selection && n.selection.trim())
+    .sort((a, b) => a.createdAt - b.createdAt);
+  for (const t of targets) wrapFirstOccurrence(box, t.selection.trim(), t.id);
+}
+
+function wrapFirstOccurrence(box, text, id) {
+  const gather = () => {
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    const starts = [];
+    let full = '';
+    let n;
+    while ((n = walker.nextNode())) {
+      starts.push([n, full.length]);
+      full += n.nodeValue;
+    }
+    return { full, starts };
+  };
+
+  let from = 0;
+  for (;;) {
+    const { full, starts } = gather();
+    const idx = full.indexOf(text, from);
+    if (idx === -1) return; // not found (markdown transformed it) — skip silently
+    const loc = locateOffset(starts, idx);
+    // Skip occurrences already inside another highlight (shared wording).
+    if (
+      loc &&
+      loc.node.parentElement &&
+      loc.node.parentElement.closest('mark.explain-src')
+    ) {
+      from = idx + 1;
+      continue;
+    }
+    if (wrapRange(starts, idx, idx + text.length, id)) return;
+    from = idx + 1; // odd layout — try the next occurrence
+  }
+}
+
+function locateOffset(starts, pos) {
+  for (const [node, off] of starts) {
+    if (pos >= off && pos < off + node.nodeValue.length) return { node, off };
+  }
+  return null;
+}
+
+function wrapRange(starts, s, e, id) {
+  let startNode = null;
+  let startOff = 0;
+  let endNode = null;
+  let endOff = 0;
+  for (const [node, off] of starts) {
+    const len = node.nodeValue.length;
+    if (!startNode && s >= off && s < off + len) {
+      startNode = node;
+      startOff = s - off;
+    }
+    if (e > off && e <= off + len) {
+      endNode = node;
+      endOff = e - off;
+      break;
+    }
+  }
+  if (!startNode || !endNode) return false;
+  try {
+    const range = document.createRange();
+    range.setStart(startNode, startOff);
+    range.setEnd(endNode, endOff);
+    const mark = document.createElement('mark');
+    mark.className = 'explain-src';
+    mark.dataset.id = id;
+    mark.title = 'Explanation ready — click to open it';
+    mark.appendChild(range.extractContents());
+    range.insertNode(mark);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function refreshAllHighlights() {
+  highlightSources(messagesEl, null);
+  for (const id of Object.keys(state.explains.nodes)) {
+    highlightSources(boxOf(id), id);
+  }
+}
+
+/* Clicking a highlighted passage: bring its container up, widen it at once. */
+function focusExplainFromMark(id) {
+  const node = state.explains.nodes[id];
+  if (!node) return;
+  if (!state.sidebar.open) showSidebar();
+  activateExplain(id); // root tab switch, scroll into view, tab highlight
+  const pane = childPane(id);
+  if (pane) {
+    // Give it a dominant share instantly (but never shrink what user sized up).
+    setPaneGrow(pane, Math.max(paneGrow(pane), 3));
+    updateCollapsedSoon();
+    persist();
+  }
+}
 
 /* ================= Topics summary (background job) ================= */
 /*
@@ -1563,6 +1722,7 @@ async function init() {
   } else {
     renderMessages();
   }
+  updateToolbarDensity();
   updateCollapsed();
   input.focus();
 }

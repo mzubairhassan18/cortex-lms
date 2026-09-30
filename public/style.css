@@ -23,7 +23,22 @@ body {
   overflow: hidden;
 }
 
-#app { display: flex; height: 100vh; }
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+#main-row { flex: 1; display: flex; min-height: 0; }
+
+/* ---------------- Top toolbar (full width, never crowds) ---------------- */
+
+#top-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  min-width: 0;
+}
 
 /* ---------------- Left sidebar ---------------- */
 
@@ -112,15 +127,6 @@ body {
   background: var(--bg);
 }
 
-#chat-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-}
-
 #left-toggle {
   background: none;
   border: none;
@@ -141,6 +147,14 @@ body {
   white-space: nowrap;
 }
 
+#model-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+#model-icon { display: none; font-size: 16px; }
+
 #model-select {
   background: var(--bg-panel);
   color: var(--text);
@@ -150,6 +164,29 @@ body {
   font-size: 13px;
   outline: none;
   cursor: pointer;
+}
+
+/* Compact toolbar (narrow window): only icons, labels hidden */
+body.compact-header #top-bar { gap: 6px; padding: 8px 10px; }
+body.compact-header .btn-label { display: none; }
+body.compact-header #explains-toggle,
+body.compact-header #summary-btn { padding: 5px 9px; }
+body.compact-header #model-wrap {
+  width: 36px;
+  height: 30px;
+  justify-content: center;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+body.compact-header #model-icon { display: inline; }
+/* Select stays functional (native dropdown) but transparent over the icon */
+body.compact-header #model-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
 }
 
 #messages {
@@ -646,6 +683,21 @@ body {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
 }
 #selection-popup:hover { opacity: 0.88; }
+
+/* ---------------- Highlighted source text ---------------- */
+/* Text that was explained gets highlighted; clicking it instantly focuses
+   (and widens) the matching explainer container. */
+
+mark.explain-src {
+  background: rgba(250, 227, 104, 0.22);
+  color: inherit;
+  border-bottom: 2px solid rgba(250, 227, 104, 0.75);
+  border-radius: 3px;
+  padding: 1px 0;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+mark.explain-src:hover { background: rgba(250, 227, 104, 0.45); }
 
 /* ---------------- Topics summary overlay ---------------- */
 

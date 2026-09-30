@@ -9,6 +9,20 @@
 <body>
   <div id="app">
 
+    <!-- Top toolbar: full width so controls never crowd when the chat shrinks -->
+    <div id="top-bar">
+      <button id="left-toggle" title="Toggle conversation list">☰</button>
+      <span id="current-title">New conversation</span>
+      <button id="explains-toggle" class="hidden" title="Show explain windows">💡 <span class="btn-label">Explains</span> <span id="explains-count">0</span></button>
+      <button id="summary-btn" title="Topics summary of this conversation">📋<span class="btn-label"> Summary</span></button>
+      <div id="model-wrap" title="Model">
+        <span id="model-icon">🤖</span>
+        <select id="model-select" title="Model"></select>
+      </div>
+    </div>
+
+    <div id="main-row">
+
     <!-- Left sidebar: conversation history -->
     <aside id="left-sidebar">
       <div class="left-header">
@@ -20,14 +34,6 @@
 
     <!-- Main chat area -->
     <main id="chat-area">
-      <div id="chat-header">
-        <button id="left-toggle" title="Toggle conversation list">☰</button>
-        <span id="current-title">New conversation</span>
-        <button id="explains-toggle" class="hidden" title="Show explain windows">💡 Explains <span id="explains-count">0</span></button>
-        <button id="summary-btn" title="Topics summary of this conversation">📋 Summary</button>
-        <select id="model-select" title="Model"></select>
-      </div>
-
       <div id="messages"></div>
 
       <form id="input-form">
@@ -62,7 +68,9 @@
       </div>
     </aside>
 
-  </div>
+    </div><!-- /#main-row -->
+
+  </div><!-- /#app -->
 
   <!-- Floating popup shown when text is selected -->
   <div id="selection-popup">💡 Explain</div>
