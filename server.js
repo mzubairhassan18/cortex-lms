@@ -7,6 +7,87 @@ const PORT = process.env.PORT || 3000;
 const OLLAMA_URL = (process.env.OLLAMA_URL || 'http://localhost:11434').replace(/\/$/, '');
 const DATA_DIR = path.join(__dirname, 'data');
 const CONV_FILE = path.join(DATA_DIR, 'conversations.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+
+// ---------- Provider settings (local Ollama or a cloud API) ----------
+const PROVIDERS = {
+  ollama:     { label: 'Local (Ollama)',             kind: 'ollama',    needsKey: false, baseUrl: OLLAMA_URL },
+  openai:     { label: 'OpenAI (ChatGPT)',           kind: 'openai',    needsKey: true,  baseUrl: 'https://api.openai.com/v1' },
+  groq:       { label: 'Groq',                       kind: 'openai',    needsKey: true,  baseUrl: 'https://api.groq.com/openai/v1' },
+  anthropic:  { label: 'Anthropic (Claude)',         kind: 'anthropic', needsKey: true,  baseUrl: 'https://api.anthropic.com' },
+  deepseek:   { label: 'DeepSeek',                   kind: 'openai',    needsKey: true,  baseUrl: 'https://api.deepseek.com/v1' },
+  openrouter: { label: 'OpenRouter',                 kind: 'openai',    needsKey: true,  baseUrl: 'https://openrouter.ai/api/v1' },
+  custom:     { label: 'Custom (OpenAI-compatible)', kind: 'openai',    needsKey: true,  baseUrl: '' },
+};
+const DEFAULT_SETTINGS = { provider: 'ollama', apiKey: '', baseUrl: '' };
+
+function loadSettings() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    return { ...DEFAULT_SETTINGS, ...(s && typeof s === 'object' ? s : {}) };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function saveSettings(s) {
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2));
+}
+
+function providerConf() {
+  const s = loadSettings();
+  const p = PROVIDERS[s.provider] || PROVIDERS.ollama;
+  const base = (String(s.baseUrl || '').trim() || p.baseUrl).replace(/\/$/, '');
+  return { s, p, base };
+}
+
+function settingsView() {
+  const s = loadSettings();
+  return {
+    provider: PROVIDERS[s.provider] ? s.provider : 'ollama',
+    baseUrl: s.baseUrl || '',
+    apiKeySet: !!s.apiKey,
+    providers: Object.entries(PROVIDERS).map(([id, p]) => ({
+      id,
+      label: p.label,
+      needsKey: p.needsKey,
+      defaultBaseUrl: p.baseUrl,
+    })),
+  };
+}
+
+function friendlyUpstream(status, text, p) {
+  const t = (text || '').slice(0, 300);
+  if (status === 401 || status === 403) {
+    return `${p.label} rejected the API key (HTTP ${status}) — check the key in ⚙ Settings.`;
+  }
+  if (status === 404) {
+    return `${p.label}: endpoint not found (404) — check the Base URL in ⚙ Settings.${t ? ` ${t}` : ''}`;
+  }
+  if (status === 429) return `${p.label} rate limited the request (429) — wait a moment and retry.`;
+  if (status === 400) return `${p.label} rejected the request (400): ${t || 'bad request'}`;
+  return `${p.label} returned HTTP ${status}${t ? `: ${t}` : ''}`;
+}
+
+async function upstreamFail(r, p) {
+  const text = await r.text().catch(() => '');
+  const e = new Error(friendlyUpstream(r.status, text, p));
+  e.httpStatus = r.status;
+  // Client errors won't succeed on retry (except rate limits).
+  if (r.status >= 400 && r.status < 500 && r.status !== 429) e.fatal = true;
+  return e;
+}
+
+function friendlyNet(e) {
+  const m = e && e.message ? e.message : String(e);
+  if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+    return 'Timed out reaching the provider.';
+  }
+  if (/ENOTFOUND|ECONNREFUSED|EAI_AGAIN|fetch failed|NetworkError|certificate|ETIMEDOUT/i.test(m)) {
+    return `Cannot reach the provider: ${m}`;
+  }
+  return m;
+}
 
 // Timeouts (ms): first byte allows the 2.5 GB model to load; idle = max gap between tokens.
 const FIRST_BYTE_MS = Number(process.env.FIRST_BYTE_MS) || 120000;
@@ -71,6 +152,9 @@ app.put('/api/conversations/:id', (req, res) => {
   if ('explains' in req.body) conv.explains = req.body.explains || null;
   // Topics summary (generated in the background).
   if ('summary' in req.body) conv.summary = req.body.summary || null;
+  // Quiz (background-generated MCQs) and finished test reports.
+  if ('quiz' in req.body) conv.quiz = req.body.quiz || null;
+  if ('tests' in req.body) conv.tests = Array.isArray(req.body.tests) ? req.body.tests : [];
   if ('messages' in req.body || 'explains' in req.body) conv.updatedAt = Date.now();
   const firstUser = conv.messages.find((m) => m.role === 'user');
   if (firstUser && (!conv.title || conv.title === 'New conversation')) {
@@ -85,26 +169,107 @@ app.delete('/api/conversations/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Model list proxy ----------
+// ---------- Settings (provider + API key) ----------
 
-app.get('/api/models', async (req, res) => {
+app.get('/api/settings', (req, res) => {
+  res.json(settingsView());
+});
+
+/* Merge a settings patch onto the stored settings (does not save). */
+function applySettingsPatch(b) {
+  const s = loadSettings();
+  if (b.provider !== undefined) {
+    if (!PROVIDERS[b.provider]) {
+      const e = new Error(`Unknown provider: ${String(b.provider).slice(0, 50)}`);
+      e.status = 400;
+      throw e;
+    }
+    if (b.provider !== s.provider) s.baseUrl = ''; // don't leak the old base URL
+    s.provider = b.provider;
+  }
+  if (typeof b.baseUrl === 'string') s.baseUrl = b.baseUrl.trim().slice(0, 300);
+  if (typeof b.apiKey === 'string' && b.apiKey.trim()) s.apiKey = b.apiKey.trim().slice(0, 500);
+  if (b.clearKey) s.apiKey = '';
+  return s;
+}
+
+app.put('/api/settings', (req, res) => {
   try {
-    const r = await fetch(`${OLLAMA_URL}/api/tags`);
-    const data = await r.json();
-    res.json(data);
+    saveSettings(applySettingsPatch(req.body || {}));
+    res.json(settingsView());
   } catch (e) {
-    res.status(502).json({ error: 'Cannot reach Ollama. Is it running? (ollama serve)' });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
-// ---------- Chat stream (SSE proxy to Ollama) ----------
+/* Connect = validate first (list the provider's models), save only on
+ * success — a bad key/URL can never replace working settings. */
+app.post('/api/settings/connect', async (req, res) => {
+  try {
+    const s = applySettingsPatch(req.body || {});
+    const p = PROVIDERS[s.provider] || PROVIDERS.ollama;
+    const base = (String(s.baseUrl || '').trim() || p.baseUrl).replace(/\/$/, '');
+    if (p.needsKey && !s.apiKey) {
+      return res.status(400).json({ error: `Enter the ${p.label} API key.` });
+    }
+    const models = await listModels(s, p, base);
+    saveSettings(s);
+    res.json({ ...settingsView(), models });
+  } catch (e) {
+    res.status(e.status || 502).json({ error: friendlyNet(e) });
+  }
+});
+
+// ---------- Model list (routes to the configured provider) ----------
+
+async function listModels(s, p, base) {
+  if (p.kind === 'ollama') {
+    const r = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(20000) });
+    if (!r.ok) throw await upstreamFail(r, p);
+    const d = await r.json();
+    return (d.models || []).map((m) => ({ name: m.name }));
+  }
+  if (p.kind === 'anthropic') {
+    const r = await fetch(`${base}/v1/models`, {
+      headers: { 'x-api-key': s.apiKey, 'anthropic-version': '2023-06-01' },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!r.ok) throw await upstreamFail(r, p);
+    const d = await r.json();
+    return (d.data || []).map((m) => ({ name: m.id }));
+  }
+  const r = await fetch(`${base}/models`, {
+    headers: { Authorization: `Bearer ${s.apiKey}` },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!r.ok) throw await upstreamFail(r, p);
+  const d = await r.json();
+  return (d.data || []).map((m) => ({ name: m.id }));
+}
+
+app.get('/api/models', async (req, res) => {
+  try {
+    const { s, p, base } = providerConf();
+    if (p.needsKey && !s.apiKey) {
+      return res
+        .status(400)
+        .json({ error: `No API key saved for ${p.label} — open ⚙ Settings and Connect.` });
+    }
+    res.json({ models: await listModels(s, p, base), provider: s.provider });
+  } catch (e) {
+    res.status(e.status || 502).json({ error: friendlyNet(e) });
+  }
+});
+
+// ---------- Chat stream (SSE proxy to the configured provider) ----------
 //
 // Robustness rules:
-// 1. Client disconnects -> immediately abort the upstream Ollama fetch, so no
+// 1. Client disconnects -> immediately abort the upstream fetch, so no
 //    zombie generations pile up and wedge the model.
 // 2. No first byte within FIRST_BYTE_MS, or a token gap longer than IDLE_MS
 //    -> abort and report a clear timeout error.
-// 3. If Ollama fails before any content was streamed, retry once automatically.
+// 3. The provider fails before any content was streamed -> retry once.
+// The response contract stays `data: {delta|"error"|"done"}` for the client.
 
 app.post('/api/chat', async (req, res) => {
   const { model, messages } = req.body || {};
@@ -151,27 +316,74 @@ app.post('/api/chat', async (req, res) => {
     res.on('close', onClose);
 
     try {
-      const ollamaRes = await fetch(`${OLLAMA_URL}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages, stream: true }),
-        signal: ctl.signal,
-      });
-
-      if (!ollamaRes.ok || !ollamaRes.body) {
-        const errText = await ollamaRes.text().catch(() => '');
-        const e = new Error(
-          `Ollama returned ${ollamaRes.status}${errText ? `: ${errText.slice(0, 400)}` : ''}`
-        );
-        e.httpStatus = ollamaRes.status;
+      const { s, p, base } = providerConf();
+      if (p.needsKey && !s.apiKey) {
+        const e = new Error(`No API key saved for ${p.label} — open ⚙ Settings and Connect.`);
+        e.fatal = true;
         throw e;
       }
 
-      const reader = ollamaRes.body.getReader();
+      // ---- build the provider request ----
+      let upstream;
+      if (p.kind === 'ollama') {
+        upstream = await fetch(`${base}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages, stream: true }),
+          signal: ctl.signal,
+        });
+      } else if (p.kind === 'anthropic') {
+        const system = messages
+          .filter((m) => m.role === 'system')
+          .map((m) => m.content)
+          .join('\n\n');
+        const convo = messages
+          .filter((m) => m.role !== 'system')
+          .map((m) => ({ role: m.role, content: m.content }));
+        upstream = await fetch(`${base}/v1/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': s.apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 4096,
+            ...(system ? { system } : {}),
+            messages: convo,
+            stream: true,
+          }),
+          signal: ctl.signal,
+        });
+      } else {
+        // OpenAI-compatible: OpenAI, Groq, DeepSeek, OpenRouter, custom endpoints.
+        upstream = await fetch(`${base}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${s.apiKey}`,
+          },
+          body: JSON.stringify({ model, messages, stream: true }),
+          signal: ctl.signal,
+        });
+      }
+
+      if (!upstream.ok || !upstream.body) throw await upstreamFail(upstream, p);
+
+      // ---- read the stream (JSONL for Ollama, SSE for the rest) ----
+      const reader = upstream.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      const extract =
+        p.kind === 'anthropic'
+          ? (j) => (j && j.delta && j.delta.text) || ''
+          : (j) =>
+              (j && j.choices && j.choices[0] && j.choices[0].delta &&
+                j.choices[0].delta.content) ||
+              '';
 
-      while (true) {
+      outer: while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         if (clientGone) break;
@@ -182,14 +394,29 @@ app.post('/api/chat', async (req, res) => {
         for (const line of lines) {
           const t = line.trim();
           if (!t) continue;
-          try {
-            const json = JSON.parse(t);
-            if (json.message && json.message.content) {
-              anyContent = true;
-              send({ delta: json.message.content });
+          if (p.kind === 'ollama') {
+            try {
+              const json = JSON.parse(t);
+              if (json.message && json.message.content) {
+                anyContent = true;
+                send({ delta: json.message.content });
+              }
+            } catch {
+              /* partial JSON line, wait for more */
             }
-          } catch {
-            /* partial JSON line, wait for more */
+          } else {
+            if (!t.startsWith('data:')) continue; // SSE comments / event: lines
+            const payload = t.slice(5).trim();
+            if (payload === '[DONE]') break outer;
+            try {
+              const d = extract(JSON.parse(payload));
+              if (d) {
+                anyContent = true;
+                send({ delta: d });
+              }
+            } catch {
+              /* partial SSE line, wait for more */
+            }
           }
         }
       }
@@ -214,12 +441,12 @@ app.post('/api/chat', async (req, res) => {
       if (clientGone) break;
       if (timedOut) {
         lastError = new Error(
-          'Timed out waiting for Ollama — the model may still be loading or busy. Try again in a moment.'
+          `Timed out waiting for ${providerConf().p.label} — the model may still be loading or busy. Try again in a moment.`
         );
         break;
       }
       lastError = err;
-      const retryable = err.name !== 'AbortError' && !anyContent;
+      const retryable = err.name !== 'AbortError' && !anyContent && !err.fatal;
       if (attempt < MAX_ATTEMPTS && retryable) {
         await sleep(800);
         continue;
@@ -229,17 +456,22 @@ app.post('/api/chat', async (req, res) => {
   }
 
   if (lastError && !clientGone) {
-    const base = lastError.message || 'Unknown error';
-    const hint = lastError.httpStatus
-      ? '\nIs Ollama running and healthy? Restart it with: ollama serve'
-      : '';
-    send({ error: base + hint });
+    const msg = lastError.message || 'Unknown error';
+    const { p } = providerConf();
+    let hint = '';
+    if (lastError.httpStatus) {
+      hint = `\nCheck ⚙ Settings — provider, API key and Base URL must match ${p.label}.`;
+    } else if (p.kind === 'ollama') {
+      hint = '\nIs Ollama running and healthy? Restart it with: ollama serve';
+    }
+    send({ error: msg + hint });
   }
   send({ done: true });
   if (!clientGone) res.end();
 });
 
 app.listen(PORT, () => {
+  const { s, p, base } = providerConf();
   console.log(`🎓 Learning Bot running at http://localhost:${PORT}`);
-  console.log(`   Ollama: ${OLLAMA_URL}`);
+  console.log(`   Provider: ${p.label} (${s.provider}) — ${base}`);
 });

@@ -51,6 +51,17 @@ const summaryBody = $('summary-body');
 const summaryStatus = $('summary-status');
 const summaryClose = $('summary-close');
 const summaryRefresh = $('summary-refresh');
+const testBadges = $('test-badges');
+const settingsBtn = $('settings-btn');
+const settingsOverlay = $('settings-overlay');
+const settingsClose = $('settings-close');
+const settingsStatus = $('settings-status');
+const setProvider = $('set-provider');
+const setKey = $('set-key');
+const setBase = $('set-base');
+const setConnect = $('set-connect');
+const setMessage = $('set-message');
+const footerModel = $('footer-model');
 const popup = $('selection-popup');
 
 /* ================= Safe markdown rendering ================= */
@@ -295,6 +306,11 @@ async function createConversation() {
   state.messages = [];
   clearExplainWindows(); // fresh explain panel for a new conversation
   delete summaryCache[conv.id];
+  delete quizCache[conv.id];
+  testsCache[conv.id] = [];
+  summaryMode = 'summary';
+  quizView = null;
+  summaryExpanded = false;
   renderSummary(null, '');
   renderConversationList();
   renderMessages();
@@ -396,8 +412,8 @@ async function selectConversation(id) {
   const prevSnapshot = explainSnapshot();
   const prevMessages = state.messages;
 
-  // Leaving a conversation -> refresh its Topics summary in the background.
-  if (prevId && prevId !== id) runSummary(prevId, prevMessages, prevSnapshot, false);
+  // Leaving a conversation -> refresh its summary + quiz in the background.
+  if (prevId && prevId !== id) runBackgroundJobs(prevId, prevMessages, prevSnapshot, false);
 
   // Fresh panel for the incoming conversation — no windows leak across.
   clearExplainWindows();
@@ -423,12 +439,21 @@ async function selectConversation(id) {
   renderMessages();
   renderConversationList();
   updateTitle();
-  // Topics summary: show the cached version instantly, refresh in background.
+  // Topics summary + quiz: show the cached version instantly, refresh in background.
   if (conv && conv.summary) summaryCache[conv.id] = conv.summary;
   else delete summaryCache[id];
+  if (conv && conv.quiz && Array.isArray(conv.quiz.questions) && conv.quiz.questions.length) {
+    quizCache[conv.id] = conv.quiz;
+  } else {
+    delete quizCache[id];
+  }
+  testsCache[id] = Array.isArray(conv && conv.tests) ? conv.tests : [];
+  summaryMode = 'summary';
+  quizView = null;
+  summaryExpanded = false;
   renderSummary(summaryCache[id] || null, '');
   restoreExplainWindows(conv && conv.explains);
-  runSummary(id, state.messages, explainSnapshot(), false);
+  runBackgroundJobs(id, state.messages, explainSnapshot(), false);
   input.focus();
 }
 
@@ -438,6 +463,8 @@ async function deleteConversation(id, e) {
   await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
   state.conversations = state.conversations.filter((c) => c.id !== id);
   delete summaryCache[id];
+  delete quizCache[id];
+  delete testsCache[id];
   if (state.currentId === id) {
     state.currentId = null;
     state.messages = [];
@@ -1168,29 +1195,154 @@ leftToggle.addEventListener('click', () => {
   leftSidebar.classList.toggle('collapsed', !state.leftOpen);
 });
 
-/* ================= Models ================= */
+/* ================= Models & provider settings ================= */
+
+let appSettings = { provider: 'ollama', baseUrl: '', apiKeySet: false, providers: [] };
+
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/settings');
+    if (r.ok) appSettings = await r.json();
+  } catch { /* keep defaults */ }
+  if (!Array.isArray(appSettings.providers) || !appSettings.providers.length) {
+    appSettings.providers = [
+      { id: 'ollama', label: 'Local (Ollama)', needsKey: false, defaultBaseUrl: '' },
+    ];
+  }
+}
+
+function providerMeta(id) {
+  return (
+    appSettings.providers.find((p) => p.id === id) || {
+      id,
+      label: id,
+      needsKey: true,
+      defaultBaseUrl: '',
+    }
+  );
+}
+
+function renderSettingsForm() {
+  setProvider.innerHTML = appSettings.providers
+    .map(
+      (p) =>
+        `<option value="${p.id}" ${p.id === appSettings.provider ? 'selected' : ''}>${escapeHtml(
+          p.label
+        )}</option>`
+    )
+    .join('');
+  setBase.value = appSettings.baseUrl || '';
+  delete setBase.dataset.touched;
+  syncProviderFields();
+}
+
+function syncProviderFields() {
+  const meta = providerMeta(setProvider.value);
+  const needsKey = meta.needsKey !== false;
+  $('set-key-row').style.display = needsKey ? '' : 'none';
+  setKey.value = '';
+  const sameProvider = setProvider.value === appSettings.provider;
+  setKey.placeholder = !needsKey
+    ? 'No key needed (local model)'
+    : sameProvider && appSettings.apiKeySet
+      ? '•••••• saved — type to replace'
+      : 'sk-…';
+  if (setBase.dataset.touched !== '1') {
+    setBase.value = sameProvider ? appSettings.baseUrl || '' : '';
+    setBase.placeholder = meta.defaultBaseUrl || 'https://…';
+  }
+  setMessage.textContent = '';
+  setMessage.className = 'set-message';
+  settingsStatus.textContent = '';
+}
+
+setProvider.addEventListener('change', () => {
+  delete setBase.dataset.touched;
+  syncProviderFields();
+});
+setBase.addEventListener('input', () => {
+  setBase.dataset.touched = '1';
+});
+
+/* Save settings, then verify by listing the provider's models. */
+async function connectProvider() {
+  const provider = setProvider.value;
+  setConnect.disabled = true;
+  setMessage.className = 'set-message working';
+  setMessage.textContent = 'Connecting…';
+  try {
+    const body = { provider, baseUrl: setBase.value.trim() };
+    const key = setKey.value.trim();
+    if (key) body.apiKey = key;
+    const r = await fetch('/api/settings/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Connection failed');
+
+    appSettings = { ...d };
+    delete appSettings.models; // settingsView only — models go to the dropdown
+    delete setBase.dataset.touched;
+
+    applyModels(d.models || []);
+    setMessage.className = 'set-message ok';
+    setMessage.textContent = `✓ Connected — ${(d.models || []).length} model(s) available`;
+    settingsStatus.textContent = '✓';
+    updateFooterModel();
+  } catch (e) {
+    setMessage.className = 'set-message err';
+    setMessage.textContent = '✗ ' + (e.message || 'Connection failed');
+    settingsStatus.textContent = '✗';
+  } finally {
+    setConnect.disabled = false;
+  }
+}
+setConnect.addEventListener('click', connectProvider);
+
+/* Left-sidebar footer: which provider + model is active. */
+function updateFooterModel() {
+  if (!footerModel) return;
+  const label = providerMeta(appSettings.provider).label;
+  footerModel.textContent = `${label} · ${state.model}`;
+  footerModel.title = `Provider: ${label}\nModel: ${state.model}`;
+}
+
+function applyModels(models) {
+  if (!models.length) throw new Error('the provider returned no models');
+  if (!models.some((m) => m.name === state.model)) state.model = models[0].name;
+  modelSelect.innerHTML = models
+    .map(
+      (m) =>
+        `<option value="${escapeHtml(m.name)}" ${
+          m.name === state.model ? 'selected' : ''
+        }>${escapeHtml(m.name)}</option>`
+    )
+    .join('');
+  updateModelWrapTitle();
+  updateFooterModel();
+}
 
 async function loadModels() {
   try {
     const res = await fetch('/api/models');
     const data = await res.json();
-    const models = data.models || [];
-    if (models.length === 0) throw new Error('no models');
-    if (!models.some((m) => m.name === state.model)) {
-      state.model = models[0].name;
-    }
-    modelSelect.innerHTML = models
-      .map((m) => `<option value="${m.name}" ${m.name === state.model ? 'selected' : ''}>${m.name}</option>`)
-      .join('');
+    if (!res.ok) throw new Error(data.error || 'model list failed');
+    applyModels(data.models || []);
   } catch {
-    modelSelect.innerHTML = `<option value="${state.model}">${state.model}</option>`;
+    modelSelect.innerHTML = `<option value="${escapeHtml(state.model)}">${escapeHtml(
+      state.model
+    )}</option>`;
   }
   updateModelWrapTitle();
+  updateFooterModel();
 }
 
 modelSelect.addEventListener('change', () => {
   state.model = modelSelect.value;
   updateModelWrapTitle();
+  updateFooterModel();
 });
 
 /* Tooltip showing the current model (useful when the select is icon-only). */
@@ -1329,10 +1481,11 @@ summaryBtn.addEventListener('click', () => {
   const panelHidden = !state.sidebar.open;
   const overlayHidden = summaryOverlay.classList.contains('hidden');
   if (panelHidden || overlayHidden) {
+    settingsOverlay.classList.add('hidden'); // only one overlay at a time
     summaryOverlay.classList.remove('hidden');
     if (panelHidden) showSidebar(); // overlay lives over the containers
     showCachedSummary();
-    runSummary(state.currentId, state.messages, explainSnapshot(), false);
+    runBackgroundJobs(state.currentId, state.messages, explainSnapshot(), false);
   } else {
     summaryOverlay.classList.add('hidden'); // close -> containers visible again
   }
@@ -1340,8 +1493,20 @@ summaryBtn.addEventListener('click', () => {
 summaryClose.addEventListener('click', () => summaryOverlay.classList.add('hidden'));
 summaryRefresh.addEventListener('click', () => {
   renderSummary(summaryCache[state.currentId], 'summarizing…');
-  runSummary(state.currentId, state.messages, explainSnapshot(), true);
+  runBackgroundJobs(state.currentId, state.messages, explainSnapshot(), true);
 });
+
+/* ---------- Settings overlay (provider + API key) ---------- */
+
+settingsBtn.addEventListener('click', () => {
+  summaryOverlay.classList.add('hidden'); // only one overlay at a time
+  const panelHidden = !state.sidebar.open;
+  settingsOverlay.classList.remove('hidden');
+  if (panelHidden) showSidebar();
+  renderSettingsForm();
+  setProvider.focus();
+});
+settingsClose.addEventListener('click', () => settingsOverlay.classList.add('hidden'));
 
 /* Toolbar collapses to icons when the window itself gets narrow. */
 function updateToolbarDensity() {
@@ -1537,6 +1702,32 @@ function focusExplainFromMark(id) {
 
 const summaryCache = {}; // convId -> { headline, points, fingerprint, at }
 const summaryState = { inflight: null, queue: null, controller: null };
+const quizCache = {};   // convId -> { fingerprint, questions: [{q,options,answer,why}], at }
+const testsCache = {};  // convId -> [report, ...] (newest last)
+const quizState = { inflight: null, queue: null, controller: null };
+
+// UI state for the summary overlay: collapsible card, active test, results.
+let summaryMode = 'summary'; // 'summary' | 'quiz' | 'results'
+let quizView = null;         // { i, answers, done, saved, report }
+let summaryExpanded = false; // points are collapsed until the user expands
+let lastSummaryStatus = '';
+
+/* Background jobs (summary, quiz) are serialized so the model gets one
+ * generation at a time — order: whatever was requested first. */
+let bgChain = Promise.resolve();
+function enqueueBg(job) {
+  const run = bgChain.then(job, job);
+  bgChain = run.then(
+    () => {},
+    () => {}
+  );
+  return run;
+}
+
+function runBackgroundJobs(convId, messages, explains, force = false) {
+  runSummary(convId, messages, explains, force);
+  runQuiz(convId, messages, explains, force);
+}
 
 function fingerprintOf(messages, explains) {
   const nodes = (explains && explains.nodes) || {};
@@ -1616,8 +1807,30 @@ function parseSummary(text) {
   return { headline: headline || 'Learning session', points };
 }
 
+function renderTestBadges() {
+  const list = testsCache[state.currentId] || [];
+  testBadges.innerHTML = list.length
+    ? `<span class="badges-label">Tests:</span>` +
+      list
+        .map(
+          (r, i) =>
+            `<button type="button" class="test-badge" data-i="${i}" title="${new Date(
+              r.at || Date.now()
+            ).toLocaleString()} — ${r.score}/${r.total} correct">${r.percent}%</button>`
+        )
+        .reverse()
+        .join('')
+    : '';
+}
+
 function renderSummary(entry, status) {
-  summaryStatus.textContent = status || '';
+  lastSummaryStatus = status || '';
+  summaryStatus.textContent = lastSummaryStatus;
+  renderTestBadges();
+  // An active test or result view owns the body — never clobber it.
+  if (summaryMode === 'quiz') return;
+  if (summaryMode === 'results') return;
+
   if (!entry || (!entry.headline && !(entry.points || []).length)) {
     summaryBody.innerHTML = `<div class="summary-empty">No summary yet.${
       state.messages.length || Object.keys(state.explains.nodes).length
@@ -1626,11 +1839,30 @@ function renderSummary(entry, status) {
     }</div>`;
     return;
   }
+
+  const quiz = quizCache[state.currentId];
+  const ready = quiz && Array.isArray(quiz.questions) && quiz.questions.length;
+  const preparing = quizState.inflight === state.currentId;
+  const cta = ready
+    ? `<button type="button" id="take-test-btn">📝 Take a test (${quiz.questions.length} questions)</button>`
+    : preparing
+      ? `<span class="test-wait">⏳ Preparing your test…</span>`
+      : `<span class="test-wait">No test yet — press ↻ to generate one.</span>`;
+
   summaryBody.innerHTML = `
-    <div class="summary-headline">${escapeHtml(entry.headline)}</div>
-    <ul class="summary-points">${(entry.points || [])
-      .map((p) => `<li>${escapeHtml(p)}</li>`)
-      .join('')}</ul>`;
+    <div class="summary-card">
+      <button type="button" class="summary-collapse" id="sum-collapse"
+              aria-expanded="${summaryExpanded}">
+        <span class="caret">${summaryExpanded ? '▾' : '▸'}</span>
+        <span class="summary-headline">${escapeHtml(String(entry.headline || ''))}</span>
+      </button>
+      <div class="summary-details"${summaryExpanded ? '' : ' hidden'}>
+        <ul class="summary-points">${(entry.points || [])
+          .map((p) => `<li>${escapeHtml(p)}</li>`)
+          .join('')}</ul>
+        <div class="test-cta">${cta}</div>
+      </div>
+    </div>`;
 }
 
 function showCachedSummary() {
@@ -1702,19 +1934,416 @@ function runSummary(convId, messages, explains, force = false) {
     if (queue) runSummary(queue.convId, queue.messages, queue.explains, queue.force);
   }
 
-  streamChat(
-    [
-      { role: 'system', content: SUMMARY_SYS },
-      { role: 'user', content: summaryPromptInput(messages, explains) },
-    ],
-    collector,
-    summaryState.controller.signal
+  // Serialize with the quiz job — one generation at a time.
+  const signal = summaryState.controller.signal;
+  enqueueBg(
+    () =>
+      new Promise((resolve) => {
+        const wrapped = {
+          start: collector.start,
+          push: collector.push,
+          end() {
+            try {
+              collector.end();
+            } finally {
+              resolve();
+            }
+          },
+        };
+        streamChat(
+          [
+            { role: 'system', content: SUMMARY_SYS },
+            { role: 'user', content: summaryPromptInput(messages, explains) },
+          ],
+          wrapped,
+          signal
+        );
+      })
   );
 }
+
+/* ================= Quiz (background job) ================= */
+/*
+ * A multiple-choice test generated from the same session content as the
+ * summary: 5-20 questions (longer conversation -> longer test), each with
+ * exactly 4 options and one correct answer. Cached per conversation,
+ * refreshed on open / on leaving / via ↻, persisted with PUT {quiz}.
+ */
+
+const QUIZ_SYS = [
+  'You write multiple-choice quiz questions for a learning session.',
+  'Output ONLY a JSON array — no markdown fences, no commentary, no extra text.',
+  'Each element: {"q":"question","options":["A","B","C","D"],"answer":0,"why":"one short sentence explaining the correct answer"}',
+  'Rules:',
+  '- exactly 4 options per question; exactly one correct answer ("answer" is its 0-based index).',
+  '- Test understanding (definitions, cause and effect, examples, application), not trivia or wording memory.',
+  '- Every question must be answerable ONLY from the session content provided.',
+  '- Vary difficulty; cover different parts of the session; never test the same fact twice.',
+  '- Plain short English sentences.',
+].join('\n');
+
+/* Question count scales with the conversation: base 5, +1 per 5 messages,
+ * +1 per summary point, clamped to 4..20. */
+function quizCount(convId, messages, explains) {
+  const nodes = (explains && explains.nodes) || {};
+  let msgs = messages.length;
+  for (const nd of Object.values(nodes)) msgs += (nd.messages || []).length;
+  const pts = ((summaryCache[convId] || {}).points || []).length;
+  return Math.max(4, Math.min(20, 5 + Math.floor(msgs / 5) + pts));
+}
+
+function parseQuiz(text) {
+  const t = String(text || '')
+    .replace(/```(?:json)?/gi, '')
+    .trim();
+  const start = t.indexOf('[');
+  const end = t.lastIndexOf(']');
+  if (start === -1 || end <= start) return [];
+  let arr;
+  try {
+    arr = JSON.parse(t.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (const raw of arr) {
+    if (!raw || typeof raw.q !== 'string' || !raw.q.trim()) continue;
+    const opts = Array.isArray(raw.options)
+      ? raw.options.filter((o) => typeof o === 'string' && o.trim())
+      : [];
+    const ans = Number(raw.answer);
+    if (opts.length < 2 || opts.length > 6) continue;
+    if (!Number.isInteger(ans) || ans < 0 || ans >= opts.length) continue;
+    out.push({
+      q: raw.q.trim(),
+      options: opts.map((o) => o.trim()),
+      answer: ans,
+      why: typeof raw.why === 'string' ? raw.why.trim() : '',
+    });
+  }
+  return out;
+}
+
+function runQuiz(convId, messages, explains, force = false) {
+  if (!convId) return;
+  const fp = fingerprintOf(messages, explains);
+  const cached = quizCache[convId];
+  if (!force && cached && cached.fingerprint === fp && (cached.questions || []).length) return;
+  if (
+    messages.length === 0 &&
+    Object.keys((explains && explains.nodes) || {}).length === 0
+  ) {
+    return;
+  }
+  if (quizState.inflight) {
+    quizState.queue = { convId, messages, explains, force };
+    return;
+  }
+
+  quizState.inflight = convId;
+  quizState.controller = new AbortController();
+  const isCurrent = () => convId === state.currentId;
+  if (isCurrent() && summaryMode === 'summary') {
+    renderSummary(summaryCache[convId], lastSummaryStatus || 'preparing test…');
+  }
+
+  let buf = '';
+  let finished = false;
+  const collector = {
+    start() {},
+    push(t) {
+      buf += t;
+    },
+    end() {
+      finish(buf);
+    },
+  };
+
+  function finish(text) {
+    if (finished) return;
+    finished = true;
+    quizState.inflight = null;
+    quizState.controller = null;
+    const queue = quizState.queue;
+    quizState.queue = null;
+
+    const questions = parseQuiz(text);
+    const status = summaryState.inflight === convId ? 'summarizing…' : '';
+    if (questions.length) {
+      const entry = { fingerprint: fp, questions, at: Date.now() };
+      quizCache[convId] = entry;
+      fetch(`/api/conversations/${convId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quiz: entry }),
+      }).catch(() => {});
+      if (isCurrent() && summaryMode === 'summary') {
+        renderSummary(summaryCache[convId], status);
+      }
+    } else if (isCurrent() && summaryMode === 'summary') {
+      renderSummary(summaryCache[convId], text ? 'test generation failed — press ↻' : status);
+    }
+    if (queue) runQuiz(queue.convId, queue.messages, queue.explains, queue.force);
+  }
+
+  const signal = quizState.controller.signal;
+  // Serialize behind the summary job — one generation at a time.
+  enqueueBg(
+    () =>
+      new Promise((resolve) => {
+        const wrapped = {
+          start: collector.start,
+          push: collector.push,
+          end() {
+            try {
+              collector.end();
+            } finally {
+              resolve();
+            }
+          },
+        };
+        const n = quizCount(convId, messages, explains);
+        streamChat(
+          [
+            { role: 'system', content: QUIZ_SYS },
+            {
+              role: 'user',
+              content: `${summaryPromptInput(messages, explains)}\n\nCreate exactly ${n} questions for this learning session.`,
+            },
+          ],
+          wrapped,
+          signal
+        );
+      })
+  );
+}
+
+/* ---------- Take a test: one question at a time, auto-advance ---------- */
+
+function currentQuestions() {
+  if (quizView && Array.isArray(quizView.questions)) return quizView.questions;
+  const q = quizCache[state.currentId];
+  return (q && q.questions) || [];
+}
+
+function startTest() {
+  const q = quizCache[state.currentId];
+  const qs = (q && q.questions) || [];
+  if (!qs.length) return;
+  quizView = {
+    questions: qs, // snapshot — later background refreshes don't disturb the test
+    i: 0,
+    answers: new Array(qs.length).fill(null),
+    done: false,
+    saved: false,
+    report: null,
+  };
+  summaryMode = 'quiz';
+  renderQuiz();
+}
+
+function backToSummary() {
+  summaryMode = 'summary';
+  quizView = null;
+  renderSummary(summaryCache[state.currentId], lastSummaryStatus);
+}
+
+function renderQuiz() {
+  const qs = currentQuestions();
+  if (!quizView || !qs.length) {
+    backToSummary();
+    return;
+  }
+  const i = Math.min(quizView.i, qs.length - 1);
+  quizView.i = i;
+  const q = qs[i];
+  const picked = quizView.answers[i];
+  summaryBody.innerHTML = `
+    <div class="quiz-card">
+      <div class="quiz-top">
+        <span class="quiz-progress">Question ${i + 1} / ${qs.length}</span>
+        <div class="quiz-bar"><div class="quiz-bar-fill" style="width:${Math.round(
+          (100 * (i + 1)) / qs.length
+        )}%"></div></div>
+      </div>
+      <div class="quiz-q">${escapeHtml(q.q)}</div>
+      <div class="quiz-options">
+        ${q.options
+          .map(
+            (o, oi) => `
+          <button type="button" class="quiz-opt${picked === oi ? ' picked' : ''}" data-opt="${oi}">
+            <span class="opt-letter">${String.fromCharCode(65 + oi)}</span>
+            <span class="opt-text">${escapeHtml(String(o))}</span>
+          </button>`
+          )
+          .join('')}
+      </div>
+      <div class="quiz-nav">
+        <button type="button" id="quiz-prev"${i === 0 ? ' disabled' : ''}>‹ Previous</button>
+        <span class="quiz-hint">${
+          picked === null ? 'Pick an answer — the test moves on by itself.' : ''
+        }</span>
+      </div>
+    </div>`;
+}
+
+function persistTests() {
+  fetch(`/api/conversations/${state.currentId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tests: testsCache[state.currentId] || [] }),
+  }).catch(() => {});
+}
+
+function finishTest() {
+  const qs = currentQuestions();
+  if (!quizView || !qs.length) {
+    backToSummary();
+    return;
+  }
+  const items = qs.map((q, idx) => ({
+    q: q.q,
+    options: q.options,
+    answer: q.answer,
+    why: q.why || '',
+    picked: quizView.answers[idx],
+  }));
+  const score = items.filter((it) => it.picked === it.answer).length;
+  const percent = items.length ? Math.round((100 * score) / items.length) : 0;
+  const report = { score, total: items.length, percent, at: Date.now(), items };
+  quizView.report = report;
+  quizView.done = true;
+  if (!quizView.saved) {
+    quizView.saved = true;
+    const list = testsCache[state.currentId] || (testsCache[state.currentId] = []);
+    list.push(report);
+    if (list.length > 10) list.splice(0, list.length - 10);
+    persistTests();
+  }
+  summaryMode = 'results';
+  renderResults();
+}
+
+function viewReport(idx) {
+  const r = (testsCache[state.currentId] || [])[idx];
+  if (!r) return;
+  quizView = { questions: [], i: 0, answers: [], done: true, saved: true, report: r };
+  summaryMode = 'results';
+  renderResults();
+}
+
+function renderResults() {
+  const r = quizView && quizView.report;
+  if (!r) {
+    backToSummary();
+    return;
+  }
+  renderTestBadges();
+  const grade =
+    r.percent >= 90
+      ? '🏆 Excellent!'
+      : r.percent >= 70
+        ? '👏 Good job!'
+        : r.percent >= 50
+          ? '📘 Decent — review the points, then try again.'
+          : '🌱 Have another look at the summary, then try again.';
+  summaryBody.innerHTML = `
+    <div class="results-card">
+      <div class="results-score">${r.score}/${r.total} <span class="results-pct">${r.percent}%</span></div>
+      <div class="results-grade">${grade}</div>
+      <ul class="results-list">
+        ${(r.items || [])
+          .map((it, idx) => {
+            const ok = it.picked === it.answer;
+            const opts = it.options || [];
+            const pickedTxt =
+              it.picked == null ? '—' : String(opts[it.picked] != null ? opts[it.picked] : '—');
+            const correctTxt = String(opts[it.answer] != null ? opts[it.answer] : '—');
+            const line = ok
+              ? 'Your answer: ' + escapeHtml(pickedTxt)
+              : 'Your answer: <s>' +
+                escapeHtml(pickedTxt) +
+                '</s> · Correct: <b>' +
+                escapeHtml(correctTxt) +
+                '</b>';
+            return `<li class="${ok ? 'ok' : 'bad'}">
+              <div class="res-q"><span class="res-mark">${ok ? '✓' : '✗'}</span>${idx + 1}. ${escapeHtml(
+                String(it.q || '')
+              )}</div>
+              <div class="res-line">${line}</div>
+              ${it.why ? `<div class="res-why">${escapeHtml(String(it.why))}</div>` : ''}
+            </li>`;
+          })
+          .join('')}
+      </ul>
+      <div class="quiz-nav">
+        <button type="button" id="quiz-retake">↻ Retake</button>
+        <button type="button" id="quiz-back">‹ Back to summary</button>
+      </div>
+    </div>`;
+}
+
+/* ---------- Delegated clicks inside the summary overlay ---------- */
+
+summaryBody.addEventListener('click', (e) => {
+  // Collapsible header: show/hide the points (and the test button).
+  if (e.target.closest('#sum-collapse')) {
+    summaryExpanded = !summaryExpanded;
+    renderSummary(summaryCache[state.currentId], lastSummaryStatus);
+    return;
+  }
+  if (e.target.closest('#take-test-btn')) {
+    startTest();
+    return;
+  }
+
+  // Pick an answer -> the test advances automatically (no Next button).
+  const opt = e.target.closest('.quiz-opt');
+  if (opt && summaryMode === 'quiz' && quizView) {
+    const at = quizView.i;
+    quizView.answers[at] = Number(opt.dataset.opt);
+    renderQuiz(); // show the pick immediately
+    setTimeout(() => {
+      if (!quizView || summaryMode !== 'quiz' || quizView.i !== at) return;
+      const qs = currentQuestions();
+      if (quizView.i < qs.length - 1) {
+        quizView.i += 1;
+        renderQuiz();
+      } else {
+        finishTest();
+      }
+    }, 450);
+    return;
+  }
+
+  if (e.target.closest('#quiz-prev')) {
+    if (quizView && quizView.i > 0) {
+      quizView.i -= 1;
+      renderQuiz();
+    }
+    return;
+  }
+  if (e.target.closest('#quiz-retake')) {
+    startTest();
+    return;
+  }
+  if (e.target.closest('#quiz-back')) {
+    backToSummary();
+    return;
+  }
+});
+
+/* Header badges: past test reports, newest first. */
+testBadges.addEventListener('click', (e) => {
+  const b = e.target.closest('.test-badge');
+  if (b) viewReport(Number(b.dataset.i));
+});
 
 /* ================= Init ================= */
 
 async function init() {
+  await loadSettings();
   await loadModels();
   await loadConversations();
   if (state.conversations.length > 0) {

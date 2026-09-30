@@ -30,6 +30,11 @@
       </div>
       <button id="new-chat-btn">+ New Chat</button>
       <div id="conversation-list"></div>
+      <!-- Static footer: active provider/model + settings entry -->
+      <div id="sidebar-footer">
+        <div id="footer-model" title="Active provider and model">🤖 …</div>
+        <button id="settings-btn" title="Provider & API settings">⚙ Settings</button>
+      </div>
     </aside>
 
     <!-- Main chat area -->
@@ -60,10 +65,35 @@
           <div class="summary-head">
             <span class="summary-title">📋 Topics — what I've learned</span>
             <span id="summary-status"></span>
-            <button id="summary-refresh" title="Regenerate now">↻</button>
+            <span id="test-badges" title="Tests taken"></span>
+            <button id="summary-refresh" title="Regenerate summary & test now">↻</button>
             <button id="summary-close" title="Close (containers stay)" class="summary-x">✕</button>
           </div>
           <div id="summary-body"></div>
+        </div>
+        <div id="settings-overlay" class="hidden">
+          <div class="summary-head">
+            <span class="summary-title">⚙ Settings</span>
+            <span id="settings-status"></span>
+            <button id="settings-close" title="Close (containers stay)" class="summary-x">✕</button>
+          </div>
+          <div id="settings-body">
+            <label class="set-label" for="set-provider">Model provider</label>
+            <select id="set-provider"></select>
+
+            <div id="set-key-row">
+              <label class="set-label" for="set-key">API key</label>
+              <input id="set-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
+            </div>
+
+            <label class="set-label" for="set-base">Base URL <span class="set-inline-hint">(optional — OpenAI-compatible endpoints)</span></label>
+            <input id="set-base" type="text" placeholder="https://api.openai.com/v1" spellcheck="false">
+
+            <div class="set-actions">
+              <button id="set-connect">Connect</button>
+            </div>
+            <div id="set-message" class="set-message"></div>
+          </div>
         </div>
       </div>
     </aside>
