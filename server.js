@@ -10,14 +10,34 @@ const CONV_FILE = path.join(DATA_DIR, 'conversations.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 // ---------- Provider settings (local Ollama or a cloud API) ----------
+// Providers — mainstream APIs plus the free tiers from
+// https://github.com/mnfst/awesome-free-llm-apis (no credit card anywhere).
+// FREE + NO KEY (base URL only) come first, then local, then free-with-key,
+// then mainstream paid APIs, then custom.
 const PROVIDERS = {
-  ollama:     { label: 'Local (Ollama)',             kind: 'ollama',    needsKey: false, baseUrl: OLLAMA_URL },
-  openai:     { label: 'OpenAI (ChatGPT)',           kind: 'openai',    needsKey: true,  baseUrl: 'https://api.openai.com/v1' },
-  groq:       { label: 'Groq',                       kind: 'openai',    needsKey: true,  baseUrl: 'https://api.groq.com/openai/v1' },
-  anthropic:  { label: 'Anthropic (Claude)',         kind: 'anthropic', needsKey: true,  baseUrl: 'https://api.anthropic.com' },
-  deepseek:   { label: 'DeepSeek',                   kind: 'openai',    needsKey: true,  baseUrl: 'https://api.deepseek.com/v1' },
-  openrouter: { label: 'OpenRouter',                 kind: 'openai',    needsKey: true,  baseUrl: 'https://openrouter.ai/api/v1' },
-  custom:     { label: 'Custom (OpenAI-compatible)', kind: 'openai',    needsKey: true,  baseUrl: '' },
+  // ---- Free, no API key at all (just the base URL) ----
+  kilo:         { label: 'Kilo Code (free · no key)',         kind: 'openai',    needsKey: false, baseUrl: 'https://api.kilo.ai/api/gateway' },
+  llm7:         { label: 'LLM7.io (free · no key)',           kind: 'openai',    needsKey: false, baseUrl: 'https://api.llm7.io/v1' },
+  ovh:          { label: 'OVHcloud AI (free · anonymous)',    kind: 'openai',    needsKey: false, baseUrl: 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1' },
+  // ---- Local ----
+  ollama:       { label: 'Local (Ollama)',                    kind: 'ollama',    needsKey: false, baseUrl: OLLAMA_URL },
+  // ---- Free tier with a free API key (no credit card) ----
+  gemini:       { label: 'Google Gemini (free tier)',   kind: 'openai', needsKey: true, baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+  mistral:      { label: 'Mistral AI (free mode)',      kind: 'openai', needsKey: true, baseUrl: 'https://api.mistral.ai/v1' },
+  zai:          { label: 'Z AI / GLM (free models)',    kind: 'openai', needsKey: true, baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
+  nvidia:       { label: 'NVIDIA NIM (free)',           kind: 'openai', needsKey: true, baseUrl: 'https://integrate.api.nvidia.com/v1' },
+  aionlabs:     { label: 'Aion Labs (free)',            kind: 'openai', needsKey: true, baseUrl: 'https://api.aionlabs.ai/v1' },
+  hf:           { label: 'Hugging Face (router)',       kind: 'openai', needsKey: true, baseUrl: 'https://router.huggingface.co/v1' },
+  ollamac:      { label: 'Ollama Cloud (free tier)',    kind: 'openai', needsKey: true, baseUrl: 'https://ollama.com/v1' },
+  siliconflow:  { label: 'SiliconFlow (free models)',   kind: 'openai', needsKey: true, baseUrl: 'https://api.siliconflow.cn/v1' },
+  modelscope:   { label: 'ModelScope (free)',           kind: 'openai', needsKey: true, baseUrl: 'https://api-inference.modelscope.cn/v1' },
+  // Mainstream
+  openai:       { label: 'OpenAI (ChatGPT)',           kind: 'openai',    needsKey: true,  baseUrl: 'https://api.openai.com/v1' },
+  groq:         { label: 'Groq',                       kind: 'openai',    needsKey: true,  baseUrl: 'https://api.groq.com/openai/v1' },
+  anthropic:    { label: 'Anthropic (Claude)',         kind: 'anthropic', needsKey: true,  baseUrl: 'https://api.anthropic.com' },
+  deepseek:     { label: 'DeepSeek',                   kind: 'openai',    needsKey: true,  baseUrl: 'https://api.deepseek.com/v1' },
+  openrouter:   { label: 'OpenRouter',                 kind: 'openai',    needsKey: true,  baseUrl: 'https://openrouter.ai/api/v1' },
+  custom:       { label: 'Custom (OpenAI-compatible)', kind: 'openai',    needsKey: true,  baseUrl: '' },
 };
 const DEFAULT_SETTINGS = { provider: 'ollama', apiKey: '', baseUrl: '' };
 
@@ -59,6 +79,9 @@ function settingsView() {
 function friendlyUpstream(status, text, p) {
   const t = (text || '').slice(0, 300);
   if (status === 401 || status === 403) {
+    if (p.needsKey === false) {
+      return `${p.label} refused the request (HTTP ${status}) — free endpoints only serve their free models; pick one of the free models in ⚙ Settings.`;
+    }
     return `${p.label} rejected the API key (HTTP ${status}) — check the key in ⚙ Settings.`;
   }
   if (status === 404) {
@@ -239,7 +262,7 @@ async function listModels(s, p, base) {
     return (d.data || []).map((m) => ({ name: m.id }));
   }
   const r = await fetch(`${base}/models`, {
-    headers: { Authorization: `Bearer ${s.apiKey}` },
+    headers: s.apiKey ? { Authorization: `Bearer ${s.apiKey}` } : {},
     signal: AbortSignal.timeout(20000),
   });
   if (!r.ok) throw await upstreamFail(r, p);
@@ -273,6 +296,13 @@ app.get('/api/models', async (req, res) => {
 
 app.post('/api/chat', async (req, res) => {
   const { model, messages } = req.body || {};
+  // Optional generation tuning (background jobs send low temperature +
+  // anti-repeat to keep small models from looping).
+  const temperature =
+    req.body && Number.isFinite(+req.body.temperature) ? +req.body.temperature : null;
+  const frequency = req.body && Number.isFinite(+req.body.frequency) ? +req.body.frequency : 0;
+  const maxTokens = req.body && Number.isFinite(+req.body.maxTokens) ? +req.body.maxTokens : 0;
+  const jsonMode = !!(req.body && req.body.jsonMode); // grammar-locked JSON (Ollama)
   if (!model || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'model and messages are required' });
   }
@@ -326,10 +356,22 @@ app.post('/api/chat', async (req, res) => {
       // ---- build the provider request ----
       let upstream;
       if (p.kind === 'ollama') {
+        const options = {};
+        if (temperature !== null) options.temperature = temperature;
+        if (frequency > 0) options.repeat_penalty = Math.min(1.3, 1 + frequency * 0.5);
+        if (maxTokens > 0) options.num_predict = maxTokens; // bound runaway loops
         upstream = await fetch(`${base}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages, stream: true }),
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: true,
+            // Grammar-locked JSON output — small models otherwise emit
+            // syntactically broken JSON that can't be parsed.
+            ...(jsonMode ? { format: 'json' } : {}),
+            ...(Object.keys(options).length ? { options } : {}),
+          }),
           signal: ctl.signal,
         });
       } else if (p.kind === 'anthropic') {
@@ -349,7 +391,8 @@ app.post('/api/chat', async (req, res) => {
           },
           body: JSON.stringify({
             model,
-            max_tokens: 4096,
+            max_tokens: maxTokens > 0 ? Math.min(maxTokens, 4096) : 4096,
+            ...(temperature !== null ? { temperature } : {}),
             ...(system ? { system } : {}),
             messages: convo,
             stream: true,
@@ -357,14 +400,22 @@ app.post('/api/chat', async (req, res) => {
           signal: ctl.signal,
         });
       } else {
-        // OpenAI-compatible: OpenAI, Groq, DeepSeek, OpenRouter, custom endpoints.
+        // OpenAI-compatible: OpenAI, Groq, DeepSeek, OpenRouter, the free
+        // keyless gateways (Kilo/LLM7/OVH), and custom endpoints.
         upstream = await fetch(`${base}/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${s.apiKey}`,
+            ...(s.apiKey ? { Authorization: `Bearer ${s.apiKey}` } : {}),
           },
-          body: JSON.stringify({ model, messages, stream: true }),
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: true,
+            ...(temperature !== null ? { temperature } : {}),
+            ...(frequency > 0 ? { frequency_penalty: frequency } : {}),
+            ...(maxTokens > 0 ? { max_tokens: maxTokens } : {}),
+          }),
           signal: ctl.signal,
         });
       }

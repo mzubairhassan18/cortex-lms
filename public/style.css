@@ -853,6 +853,25 @@ mark.explain-src:hover { background: rgba(250, 227, 104, 0.45); }
   padding: 12px;
 }
 .summary-details[hidden] { display: none; }
+/* ---------------- "Take a test" section (own card, below the session) ------- */
+
+#summary-card-slot:not(:empty) { margin-bottom: 12px; }
+.test-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.test-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  font-size: 13.5px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--border);
+}
+.test-card .test-cta { padding: 12px; margin-top: 0; }
 .test-cta { margin-top: 12px; }
 #take-test-btn {
   width: 100%;

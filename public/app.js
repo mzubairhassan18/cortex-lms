@@ -48,6 +48,8 @@ const sidebarReset = $('sidebar-reset');
 const summaryBtn = $('summary-btn');
 const summaryOverlay = $('summary-overlay');
 const summaryBody = $('summary-body');
+const summaryCardSlot = $('summary-card-slot');
+const testSection = $('test-section');
 const summaryStatus = $('summary-status');
 const summaryClose = $('summary-close');
 const summaryRefresh = $('summary-refresh');
@@ -187,7 +189,7 @@ function makeStreamer(container, onFinish) {
  * Streams from /api/chat. Retries once when nothing has been delivered yet,
  * never retries after an abort, and surfaces friendly error text.
  */
-async function streamChat(messages, streamer, signal) {
+async function streamChat(messages, streamer, signal, opts) {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const MAX_ATTEMPTS = 2;
   let receivedAny = false;
@@ -199,7 +201,14 @@ async function streamChat(messages, streamer, signal) {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: state.model, messages }),
+        body: JSON.stringify({
+          model: state.model,
+          messages,
+          ...(opts && opts.temperature != null ? { temperature: opts.temperature } : {}),
+          ...(opts && opts.frequency ? { frequency: opts.frequency } : {}),
+          ...(opts && opts.maxTokens ? { maxTokens: opts.maxTokens } : {}),
+          ...(opts && opts.jsonMode ? { jsonMode: true } : {}),
+        }),
         signal,
       });
 
@@ -1231,7 +1240,8 @@ function renderSettingsForm() {
         )}</option>`
     )
     .join('');
-  setBase.value = appSettings.baseUrl || '';
+  const activeMeta = providerMeta(appSettings.provider);
+  setBase.value = appSettings.baseUrl || activeMeta.defaultBaseUrl || '';
   delete setBase.dataset.touched;
   syncProviderFields();
 }
@@ -1243,12 +1253,15 @@ function syncProviderFields() {
   setKey.value = '';
   const sameProvider = setProvider.value === appSettings.provider;
   setKey.placeholder = !needsKey
-    ? 'No key needed (local model)'
+    ? 'No key needed'
     : sameProvider && appSettings.apiKeySet
       ? '•••••• saved — type to replace'
       : 'sk-…';
   if (setBase.dataset.touched !== '1') {
-    setBase.value = sameProvider ? appSettings.baseUrl || '' : '';
+    // Pick the provider's base URL automatically (editable if overridden).
+    setBase.value = sameProvider
+      ? appSettings.baseUrl || meta.defaultBaseUrl || ''
+      : meta.defaultBaseUrl || '';
     setBase.placeholder = meta.defaultBaseUrl || 'https://…';
   }
   setMessage.textContent = '';
@@ -1742,13 +1755,193 @@ function fingerprintOf(messages, explains) {
   return `${n}:${chars}`;
 }
 
-const SUMMARY_SYS = [
-  'You summarize a learning session for the student to glance at later.',
-  'Output EXACTLY this format and nothing else:',
-  'Line 1: one single sentence summarizing what the student is learning and has achieved so far.',
-  'Then 3 to 10 bullet points, one per line, each starting with "- ", naming concrete topics that were asked about and learned (question -> what was learned).',
-  'Plain short lines. No preamble, no closing remarks, no markdown headings.',
+/* Map-reduce summarization — small models (phi4-mini: 3.8B / 4K context)
+ * degenerate into repetition loops when handed the whole session at once.
+ * So instead:  1) MAP — split the session into small chunks (one Q&A /
+ * explainer topic each, ~1.1K chars) and extract a few notes per chunk;
+ * 2) MERGE — only if the combined notes are still large, condense them in
+ * halves; 3) REDUCE — condense everything into headline + 3-10 bullets.
+ * Low temperature + frequency/repeat penalties + validation (drop repeated/
+ * duplicate/junk lines) is the standard reliable recipe for summarizing
+ * long content with small models. */
+
+const SUMMARY_SYS_MAP = [
+  'You extract study notes from ONE short excerpt of a learning conversation.',
+  'Output ONLY bullet points, one per line, each starting with "- ".',
+  'Each point: one short plain sentence (max 20 words) naming what was asked and what was learned (question -> key fact/answer).',
+  '2 to 5 points. No preamble, no numbering, no headings, no repeated words, no closing remarks.',
 ].join('\n');
+
+const SUMMARY_SYS_MERGE = [
+  'You merge overlapping study notes into fewer notes.',
+  'Output ONLY bullet points, one per line, each starting with "- ".',
+  'Combine duplicates, keep every distinct topic, short plain sentences, at most 15 points, no commentary.',
+].join('\n');
+
+const SUMMARY_SYS_REDUCE = [
+  'You condense study notes into a short learning-session summary.',
+  'Output EXACTLY this format and nothing else:',
+  'Line 1: one single sentence (max 25 words) summarizing what the student is learning and has achieved.',
+  'Then 3 to 10 bullet points, one per line, each starting with "- ", naming concrete topics learned (question -> what was learned).',
+  'Merge duplicate points, plain short lines, never repeat words, no preamble, no closing remarks.',
+].join('\n');
+
+/* One awaited request inside a background job (resolves with the full text). */
+function bgRequest(messages, signal, opts) {
+  return new Promise((resolve) => {
+    let buf = '';
+    streamChat(
+      messages,
+      {
+        start() {},
+        push(t) {
+          buf += t;
+        },
+        end() {
+          resolve(buf);
+        },
+      },
+      signal,
+      opts
+    );
+  });
+}
+
+/* --- output validation: drop degenerate / repetitive / junk lines --- */
+
+function hasRepetition(s, minWords = 4) {
+  const words = String(s).toLowerCase().match(/[a-z0-9]+/g) || [];
+  if (words.length < minWords) return true; // too short to be a real point
+  for (let i = 1; i < words.length; i++) {
+    if (words[i] === words[i - 1]) return true; // "captured captured …"
+  }
+  const counts = {};
+  for (const w of words) {
+    if (w.length > 3) counts[w] = (counts[w] || 0) + 1;
+  }
+  return Object.values(counts).some((c) => c >= 4); // looping sentence
+}
+
+function sanitizePoints(lines) {
+  const out = [];
+  const keys = [];
+  for (let line of lines || []) {
+    line = String(line)
+      .replace(/\s+/g, ' ')
+      .replace(/^([-*•]\s+|\d+[.)]\s+)+/, '')
+      .replace(/\*\*/g, '')
+      .replace(/^["'“”]+|["'“”]+$/g, '')
+      .trim();
+    if (line.length < 12 || line.length > 240) continue;
+    if (hasRepetition(line)) continue;
+    if (/[:;]$/.test(line)) continue; // heading leftovers
+    if (/^(here|sure|below|following|note|notes|summary|overview|certainly)\b/i.test(line)) {
+      continue; // model preamble
+    }
+    const key = line
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const head = key.slice(0, 56);
+    if (keys.some((h) => h === key || h.startsWith(head) || head.startsWith(h.slice(0, 56)))) {
+      continue; // exact or near duplicate
+    }
+    keys.push(key);
+    out.push(line);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+function parseBulletLines(text) {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const bullets = lines.filter((l) => /^[-*•]\s+/.test(l));
+  return bullets.length ? bullets : lines; // model ignored the "-" prefix
+}
+
+function sanitizeHeadline(s, fallback) {
+  const h = String(s || '')
+    .replace(/^[-*•]\s+/, '')
+    .replace(/^#+\s*/, '')
+    .replace(/\*\*/g, '')
+    .replace(/^["'“”]+|["'“”]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!h || h.length > 220 || hasRepetition(h, 3)) return fallback;
+  return h;
+}
+
+/* --- MAP: split the session into small chunks (one topic per unit) --- */
+
+function buildSummaryChunks(messages, explains) {
+  const clip = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
+  const units = [];
+
+  const main = cleanHistory(messages || []);
+  let i = 0;
+  while (i < main.length) {
+    const m = main[i];
+    if (m.role === 'user') {
+      const a = main[i + 1] && main[i + 1].role === 'assistant' ? main[i + 1] : null;
+      units.push(`Student: ${clip(m.content, 450)}${a ? `\nTutor: ${clip(a.content, 750)}` : ''}`);
+      i += a ? 2 : 1;
+    } else {
+      units.push(`${m.role === 'assistant' ? 'Tutor' : 'Note'}: ${clip(m.content, 500)}`);
+      i += 1;
+    }
+  }
+
+  const nodes = (explains && explains.nodes) || {};
+  const roots = (explains && explains.roots) || [];
+  const seen = new Set();
+  const emit = (id, depth) => {
+    if (seen.has(id) || !nodes[id]) return;
+    seen.add(id);
+    const nd = nodes[id];
+    if (nd.selection) {
+      units.push(`Explainer topic${depth ? ' (nested)' : ''}: "${clip(nd.selection, 350)}"`);
+    }
+    const msgs = cleanHistory(nd.messages || []);
+    let j = 0;
+    while (j < msgs.length) {
+      const m = msgs[j];
+      if (m.role === 'user') {
+        const a = msgs[j + 1] && msgs[j + 1].role === 'assistant' ? msgs[j + 1] : null;
+        units.push(
+          `Student: ${clip(m.content, 300)}${a ? `\nTutor: ${clip(a.content, 500)}` : ''}`
+        );
+        j += a ? 2 : 1;
+      } else {
+        j += 1;
+      }
+    }
+    for (const c of Object.values(nodes)
+      .filter((x) => x.parentId === id)
+      .sort((a, b) => a.createdAt - b.createdAt)) {
+      emit(c.id, depth + 1);
+    }
+  };
+  for (const r of roots) emit(r, 0);
+  for (const id of Object.keys(nodes)) if (!seen.has(id)) emit(id, 0);
+
+  /* Pack units into chunks of ~1100 chars — small enough for a 4K-context
+   * model together with the prompt. A Q&A pair is never split across chunks. */
+  const chunks = [];
+  let cur = '';
+  for (const u of units) {
+    if (cur && cur.length + u.length + 2 > 1100) {
+      chunks.push(cur);
+      cur = '';
+    }
+    cur += (cur ? '\n\n' : '') + u;
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
 
 function summaryPromptInput(messages, explains) {
   const clip = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
@@ -1827,29 +2020,16 @@ function renderSummary(entry, status) {
   lastSummaryStatus = status || '';
   summaryStatus.textContent = lastSummaryStatus;
   renderTestBadges();
-  // An active test or result view owns the body — never clobber it.
-  if (summaryMode === 'quiz') return;
-  if (summaryMode === 'results') return;
 
+  // The learning-session card (headline + collapsible points).
   if (!entry || (!entry.headline && !(entry.points || []).length)) {
-    summaryBody.innerHTML = `<div class="summary-empty">No summary yet.${
+    summaryCardSlot.innerHTML = `<div class="summary-empty">No summary yet.${
       state.messages.length || Object.keys(state.explains.nodes).length
         ? ' Press ↻ to generate one.'
         : ' Chat or explain something first.'
     }</div>`;
-    return;
-  }
-
-  const quiz = quizCache[state.currentId];
-  const ready = quiz && Array.isArray(quiz.questions) && quiz.questions.length;
-  const preparing = quizState.inflight === state.currentId;
-  const cta = ready
-    ? `<button type="button" id="take-test-btn">📝 Take a test (${quiz.questions.length} questions)</button>`
-    : preparing
-      ? `<span class="test-wait">⏳ Preparing your test…</span>`
-      : `<span class="test-wait">No test yet — press ↻ to generate one.</span>`;
-
-  summaryBody.innerHTML = `
+  } else {
+    summaryCardSlot.innerHTML = `
     <div class="summary-card">
       <button type="button" class="summary-collapse" id="sum-collapse"
               aria-expanded="${summaryExpanded}">
@@ -1860,8 +2040,40 @@ function renderSummary(entry, status) {
         <ul class="summary-points">${(entry.points || [])
           .map((p) => `<li>${escapeHtml(p)}</li>`)
           .join('')}</ul>
-        <div class="test-cta">${cta}</div>
       </div>
+    </div>`;
+  }
+
+  renderTestSection();
+}
+
+/* The "Take a test" section lives in its own card directly BELOW the
+ * learning session — and becomes the quiz / results view while a test runs. */
+function renderTestSection() {
+  if (summaryMode === 'quiz') {
+    renderQuiz();
+    return;
+  }
+  if (summaryMode === 'results') {
+    renderResults();
+    return;
+  }
+  const quiz = quizCache[state.currentId];
+  const ready = quiz && Array.isArray(quiz.questions) && quiz.questions.length;
+  const preparing = quizState.inflight === state.currentId;
+  const hasContent =
+    state.messages.length > 0 || Object.keys(state.explains.nodes).length > 0;
+  const body = ready
+    ? `<button type="button" id="take-test-btn">📝 Take a test (${quiz.questions.length} question${quiz.questions.length === 1 ? '' : 's'})</button>`
+    : preparing
+      ? `<span class="test-wait">⏳ Preparing your test…</span>`
+      : hasContent
+        ? `<span class="test-wait">No test yet — press ↻ to generate one.</span>`
+        : `<span class="test-wait">Chat or explain something to unlock a test.</span>`;
+  testSection.innerHTML = `
+    <div class="test-card">
+      <div class="test-card-head">📝 Test your knowledge</div>
+      <div class="test-cta">${body}</div>
     </div>`;
 }
 
@@ -1870,7 +2082,8 @@ function showCachedSummary() {
   renderSummary(summaryCache[state.currentId], busy ? 'updating…' : '');
 }
 
-/* Single-flight: a request arriving while one runs is queued (latest wins). */
+/* Single-flight: a request arriving while one runs is queued (latest wins).
+ * The job itself is a map-reduce pipeline of several small requests. */
 function runSummary(convId, messages, explains, force = false) {
   if (!convId) return;
   const fp = fingerprintOf(messages, explains);
@@ -1889,34 +2102,120 @@ function runSummary(convId, messages, explains, force = false) {
 
   summaryState.inflight = convId;
   summaryState.controller = new AbortController();
+  const signal = summaryState.controller.signal;
   const isCurrent = () => convId === state.currentId;
-  if (isCurrent()) renderSummary(summaryCache[convId], 'summarizing…');
-
-  let buf = '';
-  let finished = false;
-  const collector = {
-    start() {},
-    push(t) {
-      buf += t;
-    },
-    end() {
-      finish(buf);
-    },
+  const setStatus = (t) => {
+    if (isCurrent()) {
+      lastSummaryStatus = t;
+      summaryStatus.textContent = t;
+    }
   };
+  setStatus('summarizing…');
 
-  function finish(text) {
-    if (finished) return;
-    finished = true;
-    summaryState.inflight = null;
-    summaryState.controller = null;
-    const queue = summaryState.queue;
-    summaryState.queue = null;
+  // Low temperature + anti-repeat + a hard output cap keeps small models out
+  // of runaway repetition loops (bounded work per background request).
+  const SAMPLING = { temperature: 0.2, frequency: 0.8, maxTokens: 500 };
 
-    if (text && text.trim() && !text.trim().startsWith('⚠️')) {
-      const parsed = parseSummary(text);
+  enqueueBg(async () => {
+    try {
+      const chunks = buildSummaryChunks(messages, explains);
+      if (!chunks.length) throw new Error('empty session');
+
+      // ---- MAP: a few notes from each small chunk ----
+      let notes = [];
+      for (let i = 0; i < chunks.length; i++) {
+        if (signal.aborted) return;
+        setStatus(
+          chunks.length > 1 ? `summarizing ${i + 1}/${chunks.length}…` : 'summarizing…'
+        );
+        const txt = await bgRequest(
+          [
+            { role: 'system', content: SUMMARY_SYS_MAP },
+            { role: 'user', content: chunks[i] },
+          ],
+          signal,
+          SAMPLING
+        );
+        if (/^\s*⚠️/.test(String(txt))) continue; // this chunk failed — keep going
+        notes.push(...parseBulletLines(txt));
+      }
+      notes = sanitizePoints(notes);
+      if (!notes.length) throw new Error('no notes extracted');
+
+      // ---- MERGE: hierarchical reduction if notes exceed one reduce pass ----
+      let guard = 0;
+      while (notes.join('\n').length > 6000 && notes.length > 12 && guard < 4) {
+        if (signal.aborted) return;
+        guard++;
+        setStatus('summarizing…');
+        const before = notes.length;
+        const half = Math.ceil(before / 2);
+        const batches = [notes.slice(0, half), notes.slice(half)];
+        const merged = [];
+        for (const b of batches) {
+          const txt = await bgRequest(
+            [
+              { role: 'system', content: SUMMARY_SYS_MERGE },
+              { role: 'user', content: b.map((p) => `- ${p}`).join('\n') },
+            ],
+            signal,
+            SAMPLING
+          );
+          if (!/^\s*⚠️/.test(String(txt))) merged.push(...parseBulletLines(txt));
+        }
+        const next = sanitizePoints(merged);
+        if (!next.length || next.length >= before) break; // no progress — stop
+        notes = next;
+      }
+
+      // ---- REDUCE: final headline + 3-10 bullets ----
+      let headline = '';
+      let points = [];
+      if (!signal.aborted) {
+        setStatus('summarizing…');
+        const txt = await bgRequest(
+          [
+            { role: 'system', content: SUMMARY_SYS_REDUCE },
+            {
+              role: 'user',
+              content: `Session notes:\n${notes.map((p) => `- ${p}`).join('\n')}`,
+            },
+          ],
+          signal,
+          SAMPLING
+        );
+        if (!/^\s*⚠️/.test(String(txt))) {
+          const parsed = parseSummary(txt);
+          headline = sanitizeHeadline(parsed.headline, '');
+          points = sanitizePoints(parsed.points);
+        }
+      }
+      if (signal.aborted) return;
+
+      // Fall back to the validated map notes if the reduce pass failed.
+      if (!points.length) points = notes.slice(0, 10);
+      if (!headline) {
+        const p0 = points[0] || '';
+        const sentence = p0.match(/^[^.!?]*[.!?]/);
+        headline = sanitizeHeadline(
+          (sentence ? sentence[0] : p0).slice(0, 160),
+          'Learning session'
+        );
+      }
+      // Drop a first bullet that just repeats the headline sentence.
+      if (points.length > 3 && headline) {
+        const norm = (s) =>
+          String(s).toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+        const nh = norm(headline);
+        const n0 = norm(points[0]);
+        if (n0 && nh && (n0 === nh || n0.startsWith(nh) || nh.startsWith(n0))) {
+          points = points.slice(1);
+        }
+      }
+
       const entry = {
-        headline: parsed.headline,
-        points: parsed.points,
+        headline,
+        points: points.slice(0, 10),
         fingerprint: fp,
         at: Date.now(),
       };
@@ -1927,39 +2226,20 @@ function runSummary(convId, messages, explains, force = false) {
         body: JSON.stringify({ summary: entry }),
       }).catch(() => {});
       if (isCurrent()) renderSummary(entry, '');
-    } else if (isCurrent()) {
-      renderSummary(summaryCache[convId], text ? 'failed — press ↻ to retry' : '');
+    } catch (e) {
+      if (isCurrent()) {
+        renderSummary(summaryCache[convId], signal.aborted ? '' : 'failed — press ↻ to retry');
+      }
+    } finally {
+      if (summaryState.inflight === convId) {
+        summaryState.inflight = null;
+        summaryState.controller = null;
+      }
+      const queue = summaryState.queue;
+      summaryState.queue = null;
+      if (queue) runSummary(queue.convId, queue.messages, queue.explains, queue.force);
     }
-
-    if (queue) runSummary(queue.convId, queue.messages, queue.explains, queue.force);
-  }
-
-  // Serialize with the quiz job — one generation at a time.
-  const signal = summaryState.controller.signal;
-  enqueueBg(
-    () =>
-      new Promise((resolve) => {
-        const wrapped = {
-          start: collector.start,
-          push: collector.push,
-          end() {
-            try {
-              collector.end();
-            } finally {
-              resolve();
-            }
-          },
-        };
-        streamChat(
-          [
-            { role: 'system', content: SUMMARY_SYS },
-            { role: 'user', content: summaryPromptInput(messages, explains) },
-          ],
-          wrapped,
-          signal
-        );
-      })
-  );
+  });
 }
 
 /* ================= Quiz (background job) ================= */
@@ -1973,14 +2253,26 @@ function runSummary(convId, messages, explains, force = false) {
 const QUIZ_SYS = [
   'You write multiple-choice quiz questions for a learning session.',
   'Output ONLY a JSON array — no markdown fences, no commentary, no extra text.',
-  'Each element: {"q":"question","options":["A","B","C","D"],"answer":0,"why":"one short sentence explaining the correct answer"}',
+  'Each element: {"q":"question","options":["choice one","choice two","choice three","choice four"],"answer":0,"why":"one short sentence explaining the correct answer"}',
   'Rules:',
   '- exactly 4 options per question; exactly one correct answer ("answer" is its 0-based index).',
+  '- Every option must be a real, plausible full answer phrase — NEVER the letters A/B/C/D or placeholder text.',
   '- Test understanding (definitions, cause and effect, examples, application), not trivia or wording memory.',
   '- Every question must be answerable ONLY from the session content provided.',
   '- Vary difficulty; cover different parts of the session; never test the same fact twice.',
   '- Plain short English sentences.',
 ].join('\n');
+
+/* Rotating focus per batch — forces variety: small models at low temperature
+ * otherwise regenerate the same "obvious" question every batch. */
+const QUIZ_FOCUS = [
+  'core definitions and what the key terms mean',
+  'causes, effects, and why things happen',
+  'practical applications, uses, and real-world examples',
+  'which of the following statements is correct (comparisons and choices)',
+  'sequences and processes — what happens step by step',
+  'advantages, limitations, and trade-offs',
+];
 
 /* Question count scales with the conversation: base 5, +1 per 5 messages,
  * +1 per summary point, clamped to 4..20. */
@@ -1996,15 +2288,82 @@ function parseQuiz(text) {
   const t = String(text || '')
     .replace(/```(?:json)?/gi, '')
     .trim();
+  const tryParse = (s) => {
+    try {
+      return JSON.parse(s);
+    } catch {
+      return null;
+    }
+  };
+
+  // --- 1. direct shapes: bare array, wrapper object, single question ---
+  let arr = null;
   const start = t.indexOf('[');
   const end = t.lastIndexOf(']');
-  if (start === -1 || end <= start) return [];
-  let arr;
-  try {
-    arr = JSON.parse(t.slice(start, end + 1));
-  } catch {
-    return [];
+  if (start !== -1 && end > start) {
+    const a = tryParse(t.slice(start, end + 1));
+    // Only accept if it actually contains question objects — otherwise a
+    // single-question output's inner options array ["A","B",...] would win.
+    if (
+      Array.isArray(a) &&
+      a.some((x) => x && typeof x === 'object' && !Array.isArray(x))
+    ) {
+      arr = a;
+    }
   }
+  if (!arr || !arr.length) {
+    const o = tryParse(t);
+    if (Array.isArray(o)) arr = o;
+    else if (o && typeof o === 'object') {
+      if (Array.isArray(o.questions)) arr = o.questions;
+      else if (typeof o.q === 'string') arr = [o]; // model returned one object
+      else arr = Object.values(o).find((v) => Array.isArray(v)) || [];
+    }
+  }
+
+  // --- 2. salvage: small models truncate (token cap) or degrade mid-array.
+  // Walk the text tracking braces/brackets/strings, keep every complete
+  // {...} object, and repair a truncated tail by closing what's open. ---
+  if (!arr || !arr.length) {
+    const stack = []; // ['{' | '[', position]
+    let inStr = false;
+    let esc = false;
+    const objs = [];
+    const tryPush = (span) => {
+      const parsed = tryParse(span);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) objs.push(parsed);
+      return Array.isArray(parsed) ? parsed : null;
+    };
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === '\\') esc = true;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === '{' || c === '[') stack.push([c, i]);
+      else if (c === '}' || c === ']') {
+        const top = stack.pop();
+        if (top && top[0] === '{' && c === '}') tryPush(t.slice(top[1], i + 1));
+      }
+    }
+    // Truncated tail: close the open string and every open bracket, reparse.
+    if (stack.length) {
+      let full = t;
+      if (inStr) full += '"';
+      for (let j = stack.length - 1; j >= 0; j--) full += stack[j][0] === '{' ? '}' : ']';
+      const o = tryParse(full);
+      if (Array.isArray(o)) arr = o;
+      else if (o && typeof o === 'object') {
+        if (Array.isArray(o.questions)) arr = o.questions;
+        else if (typeof o.q === 'string') arr = [o];
+      }
+    }
+    if ((!arr || !arr.length) && objs.length) arr = objs;
+  }
+
   if (!Array.isArray(arr)) return [];
   const out = [];
   for (const raw of arr) {
@@ -2025,6 +2384,23 @@ function parseQuiz(text) {
   return out;
 }
 
+/* Reject degenerate / repetitive questions and options produced by small
+ * models that fall into loops (same validation idea as sanitizePoints). */
+function sanitizeQuiz(questions) {
+  return (questions || []).filter((q) => {
+    if (!q || typeof q.q !== 'string') return false;
+    const t = q.q.trim();
+    if (t.length < 8 || t.length > 300 || hasRepetition(t, 3)) return false;
+    if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 6) return false;
+    if (q.options.every((o) => String(o).trim().length <= 2)) return false; // ["A","B","C","D"] placeholders
+    for (const o of q.options) {
+      if (typeof o !== 'string' || !o.trim() || o.length > 160) return false;
+      if (hasRepetition(o, 1)) return false;
+    }
+    return Number.isInteger(q.answer) && q.answer >= 0 && q.answer < q.options.length;
+  });
+}
+
 function runQuiz(convId, messages, explains, force = false) {
   if (!convId) return;
   const fp = fingerprintOf(messages, explains);
@@ -2043,80 +2419,108 @@ function runQuiz(convId, messages, explains, force = false) {
 
   quizState.inflight = convId;
   quizState.controller = new AbortController();
-  const isCurrent = () => convId === state.currentId;
-  if (isCurrent() && summaryMode === 'summary') {
-    renderSummary(summaryCache[convId], lastSummaryStatus || 'preparing test…');
-  }
-
-  let buf = '';
-  let finished = false;
-  const collector = {
-    start() {},
-    push(t) {
-      buf += t;
-    },
-    end() {
-      finish(buf);
-    },
-  };
-
-  function finish(text) {
-    if (finished) return;
-    finished = true;
-    quizState.inflight = null;
-    quizState.controller = null;
-    const queue = quizState.queue;
-    quizState.queue = null;
-
-    const questions = parseQuiz(text);
-    const status = summaryState.inflight === convId ? 'summarizing…' : '';
-    if (questions.length) {
-      const entry = { fingerprint: fp, questions, at: Date.now() };
-      quizCache[convId] = entry;
-      fetch(`/api/conversations/${convId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quiz: entry }),
-      }).catch(() => {});
-      if (isCurrent() && summaryMode === 'summary') {
-        renderSummary(summaryCache[convId], status);
-      }
-    } else if (isCurrent() && summaryMode === 'summary') {
-      renderSummary(summaryCache[convId], text ? 'test generation failed — press ↻' : status);
-    }
-    if (queue) runQuiz(queue.convId, queue.messages, queue.explains, queue.force);
-  }
-
   const signal = quizState.controller.signal;
+  const isCurrent = () => convId === state.currentId;
+  if (isCurrent()) renderTestSection(); // shows the "preparing" state
+
+  const SAMPLING = {
+    // Higher temp is safe here: format:json grammar-locks the structure, and
+    // low temps make small models mode-collapse onto the same question.
+    temperature: 0.8,
+    // no frequency/repeat penalty: with grammar-locked JSON it pushes
+    // small models into rambling inside string values until the token cap.
+    maxTokens: 900, // capped batch output
+    jsonMode: true, // grammar-locked JSON on Ollama — no broken arrays
+  };
+  const BATCH = 3; // questions per request — short outputs parse reliably
+
   // Serialize behind the summary job — one generation at a time.
-  enqueueBg(
-    () =>
-      new Promise((resolve) => {
-        const wrapped = {
-          start: collector.start,
-          push: collector.push,
-          end() {
-            try {
-              collector.end();
-            } finally {
-              resolve();
-            }
-          },
-        };
-        const n = quizCount(convId, messages, explains);
-        streamChat(
+  enqueueBg(async () => {
+    try {
+      const n = quizCount(convId, messages, explains);
+      const content = summaryPromptInput(messages, explains);
+      const all = [];
+      const seenQ = new Set();
+      let batch = 0;
+      let emptyStreak = 0;
+
+      // Generate in small batches until we have enough questions.
+      while (all.length < n && batch < 14 && emptyStreak < 4) {
+        if (signal.aborted) return;
+        const want = Math.min(BATCH, n - all.length);
+        batch++;
+        const covered = all.map((q) => q.q.slice(0, 90));
+        const focus = QUIZ_FOCUS[(batch - 1) % QUIZ_FOCUS.length];
+        const txt = await bgRequest(
           [
             { role: 'system', content: QUIZ_SYS },
             {
               role: 'user',
-              content: `${summaryPromptInput(messages, explains)}\n\nCreate exactly ${n} questions for this learning session.`,
+              content:
+                `${content}\n\nCreate exactly ${want} multiple-choice questions` +
+                (batch > 1 ? ` (batch ${batch})` : ' for this learning session.') +
+                (covered.length
+                  ? `.\nDo NOT repeat or rephrase questions already created:\n- ${covered.join('\n- ')}`
+                  : '') +
+                `.\nThis batch's focus: ${focus}.` +
+                ' Ask about a DIFFERENT fact than any question so far, ' +
+                `and output a JSON array with all ${want} questions.`,
             },
           ],
-          wrapped,
-          signal
+          signal,
+          SAMPLING
         );
-      })
-  );
+        if (/^\s*⚠️/.test(String(txt))) {
+          emptyStreak++;
+          continue;
+        }
+        const qs = sanitizeQuiz(parseQuiz(txt));
+        let added = 0;
+        for (const q of qs) {
+          if (all.length >= n) break;
+          const key = q.q.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').slice(0, 80);
+          if (!key || seenQ.has(key)) continue; // duplicate question across batches
+          seenQ.add(key);
+          all.push(q);
+          added++;
+        }
+        emptyStreak = added ? 0 : emptyStreak + 1;
+      }
+
+      const status = summaryState.inflight === convId ? 'summarizing…' : '';
+      if (all.length) {
+        const entry = { fingerprint: fp, questions: all, at: Date.now() };
+        quizCache[convId] = entry;
+        fetch(`/api/conversations/${convId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quiz: entry }),
+        }).catch(() => {});
+        if (isCurrent()) renderSummary(summaryCache[convId], status);
+      } else if (isCurrent()) {
+        renderSummary(
+          summaryCache[convId],
+          signal.aborted ? status : 'test generation failed — press ↻'
+        );
+      }
+    } catch (e) {
+      if (isCurrent()) {
+        renderSummary(
+          summaryCache[convId],
+          signal.aborted ? '' : 'test generation failed — press ↻'
+        );
+      }
+    } finally {
+      if (quizState.inflight === convId) {
+        quizState.inflight = null;
+        quizState.controller = null;
+      }
+      const queue = quizState.queue;
+      quizState.queue = null;
+      if (queue) runQuiz(queue.convId, queue.messages, queue.explains, queue.force);
+      if (isCurrent()) renderTestSection(); // ready / not-ready CTA
+    }
+  });
 }
 
 /* ---------- Take a test: one question at a time, auto-advance ---------- */
@@ -2159,7 +2563,7 @@ function renderQuiz() {
   quizView.i = i;
   const q = qs[i];
   const picked = quizView.answers[i];
-  summaryBody.innerHTML = `
+  testSection.innerHTML = `
     <div class="quiz-card">
       <div class="quiz-top">
         <span class="quiz-progress">Question ${i + 1} / ${qs.length}</span>
@@ -2248,7 +2652,7 @@ function renderResults() {
         : r.percent >= 50
           ? '📘 Decent — review the points, then try again.'
           : '🌱 Have another look at the summary, then try again.';
-  summaryBody.innerHTML = `
+  testSection.innerHTML = `
     <div class="results-card">
       <div class="results-score">${r.score}/${r.total} <span class="results-pct">${r.percent}%</span></div>
       <div class="results-grade">${grade}</div>
