@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Learning Bot</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- Left sidebar: conversation history -->
+    <aside id="left-sidebar">
+      <div class="left-header">
+        <span class="logo">🎓 Learning Bot</span>
+      </div>
+      <button id="new-chat-btn">+ New Chat</button>
+      <div id="conversation-list"></div>
+    </aside>
+
+    <!-- Main chat area -->
+    <main id="chat-area">
+      <div id="chat-header">
+        <button id="left-toggle" title="Toggle conversation list">☰</button>
+        <span id="current-title">New conversation</span>
+        <select id="model-select" title="Model"></select>
+      </div>
+
+      <div id="messages"></div>
+
+      <form id="input-form">
+        <textarea id="input" rows="1" placeholder="Ask anything...  (Enter to send, Shift+Enter for new line)"></textarea>
+        <button type="submit" id="send-btn" title="Send">➤</button>
+      </form>
+    </main>
+
+    <!-- Drag handle to resize the explain sidebar -->
+    <div id="resize-handle"></div>
+
+    <!-- Right sidebar: explain / separate session -->
+    <aside id="right-sidebar">
+      <div id="sidebar-header">
+        <div class="sidebar-title">💡 Explain</div>
+        <div class="sidebar-actions">
+          <button id="sidebar-reset" title="Clear this explanation session">↺</button>
+          <button id="sidebar-close" title="Close sidebar">✕</button>
+        </div>
+      </div>
+      <div id="sidebar-selection"></div>
+      <div id="sidebar-messages"></div>
+      <form id="sidebar-input-form">
+        <textarea id="sidebar-input" rows="1" placeholder="Ask a follow-up question..."></textarea>
+        <button type="submit" id="sidebar-send-btn" title="Send">➤</button>
+      </form>
+    </aside>
+
+  </div>
+
+  <!-- Floating popup shown when text is selected -->
+  <div id="selection-popup">💡 Explain</div>
+
+  <script src="app.js"></script>
+</body>
+</html>
