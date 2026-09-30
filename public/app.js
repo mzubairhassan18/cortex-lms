@@ -11,12 +11,13 @@ const state = {
   sidebar: {
     open: false,
     width: 380,
-    selection: '',
-    system: '',
-    messages: [],          // sidebar session messages (system excluded)
-    busy: false,
-    streamId: 0,           // guards against stale streams after abort
-    controller: null,      // AbortController of the active sidebar stream
+  },
+  // Explain windows: a tree of sessions. Roots are created from the main chat,
+  // children from selections made inside an explain window.
+  explains: {
+    nodes: {},   // id -> { id, parentId, selection, system, messages, busy, streamId, controller, createdAt }
+    roots: [],   // root ids in creation order (these become the tabs)
+    activeId: null,
   },
   leftOpen: true,
 };
@@ -36,8 +37,9 @@ const input = $('input');
 const sendBtn = $('send-btn');
 const resizeHandle = $('resize-handle');
 const rightSidebar = $('right-sidebar');
-const sidebarSelection = $('sidebar-selection');
-const sidebarMessages = $('sidebar-messages');
+const explainTabs = $('explain-tabs');
+const explainTreeRow = $('explain-tree-row');
+const explainPanels = $('explain-panels');
 const sidebarInputForm = $('sidebar-input-form');
 const sidebarInput = $('sidebar-input');
 const sidebarSendBtn = $('sidebar-send-btn');
@@ -284,6 +286,7 @@ async function createConversation() {
   state.conversations.unshift(conv);
   state.currentId = conv.id;
   state.messages = [];
+  clearExplainWindows(); // fresh explain panel for a new conversation
   renderConversationList();
   renderMessages();
   updateTitle();
@@ -319,12 +322,32 @@ async function sendMessage() {
   streamChat(cleanHistory(state.messages), streamer);
 }
 
+/* Serializable snapshot of all explain windows (no runtime fields). */
+function explainSnapshot() {
+  const nodes = {};
+  for (const [id, n] of Object.entries(state.explains.nodes)) {
+    nodes[id] = {
+      id,
+      parentId: n.parentId,
+      selection: n.selection,
+      system: n.system,
+      messages: n.messages,
+      createdAt: n.createdAt,
+    };
+  }
+  return {
+    roots: [...state.explains.roots],
+    activeId: state.explains.activeId,
+    nodes,
+  };
+}
+
 async function persist() {
   if (!state.currentId) return;
   await fetch(`/api/conversations/${state.currentId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages: state.messages }),
+    body: JSON.stringify({ messages: state.messages, explains: explainSnapshot() }),
   });
   loadConversations();
 }
@@ -356,18 +379,37 @@ function renderConversationList() {
 
 async function selectConversation(id) {
   if (state.streaming) return;
+
+  // Save the outgoing conversation (messages + explain snapshot) BEFORE switching.
+  const prevId = state.currentId;
+  const prevSnapshot = explainSnapshot();
+  const prevMessages = state.messages;
+
+  // Fresh panel for the incoming conversation — no windows leak across.
+  clearExplainWindows();
+
   state.currentId = id;
   state.messages = [];
+
+  if (prevId && prevId !== id) {
+    fetch(`/api/conversations/${prevId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: prevMessages, explains: prevSnapshot }),
+    }).catch(() => {});
+  }
+
+  let conv = null;
   try {
     const res = await fetch(`/api/conversations/${id}`);
-    if (res.ok) {
-      const conv = await res.json();
-      state.messages = conv.messages || [];
-    }
+    if (res.ok) conv = await res.json();
   } catch { /* ignore */ }
+  state.messages = (conv && conv.messages) || [];
+
   renderMessages();
   renderConversationList();
   updateTitle();
+  restoreExplainWindows(conv && conv.explains);
   input.focus();
 }
 
@@ -379,6 +421,7 @@ async function deleteConversation(id, e) {
   if (state.currentId === id) {
     state.currentId = null;
     state.messages = [];
+    clearExplainWindows();
     renderMessages();
     updateTitle();
   }
@@ -390,32 +433,195 @@ function updateTitle() {
   currentTitle.textContent = conv ? conv.title : 'New conversation';
 }
 
-/* ================= Explain sidebar ================= */
+/* ================= Explain windows (tree of sessions) ================= */
+/*
+ * Each selection creates a NEW window — windows are never overridden.
+ * - Selection in the main chat  -> root window (shows up in the tab strip)
+ * - Selection inside a window   -> child window (linked above via tree row)
+ * Snapshots are saved per conversation and restored when you come back.
+ */
 
-function buildSidebarSystem(selection, contextMessages) {
-  const recent = contextMessages.slice(-10);
-  const ctx = recent
+function formatCtx(msgs) {
+  return msgs
+    .slice(-10)
     .map((m) => {
       const who = m.role === 'user' ? 'Student' : 'Tutor';
       const content = m.content.length > 500 ? m.content.slice(0, 500) + '…' : m.content;
       return `${who}: ${content}`;
     })
     .join('\n');
+}
+
+function buildExplainSystem(selection, parentId) {
+  const parent = parentId ? state.explains.nodes[parentId] : null;
+  const lessonCtx = formatCtx(state.messages);
+
+  if (!parent) {
+    return [
+      'You are a learning assistant embedded in a study app.',
+      'The student is reading a lesson and selected text they did not fully understand.',
+      '',
+      'SELECTED TEXT:',
+      selection,
+      '',
+      'LESSON CONTEXT (recent conversation):',
+      lessonCtx || '(no context yet)',
+      '',
+      'Explain the selected text in simple, clear terms. Define any difficult words, terms, or concepts.',
+      'Use short examples when helpful. Keep the explanation focused on the selected text.',
+      'The student may ask follow-up questions in this panel — answer them using the lesson context above.',
+    ].join('\n');
+  }
 
   return [
     'You are a learning assistant embedded in a study app.',
-    'The student is reading a lesson and selected text they did not fully understand.',
+    'The student is reading an explanation you gave and selected text inside it they did not fully understand.',
     '',
-    'SELECTED TEXT:',
+    'TEXT SELECTED FROM THE EXPLANATION:',
     selection,
     '',
-    'LESSON CONTEXT (recent conversation):',
-    ctx || '(no context yet)',
+    'THE EXPLANATION BEING READ (earlier exchange in this window):',
+    formatCtx(parent.messages) || '(not available)',
+    '',
+    'ORIGINAL LESSON CONTEXT (recent conversation):',
+    lessonCtx || '(no context yet)',
     '',
     'Explain the selected text in simple, clear terms. Define any difficult words, terms, or concepts.',
     'Use short examples when helpful. Keep the explanation focused on the selected text.',
-    'The student may ask follow-up questions in this panel — answer them using the lesson context above.',
+    'The student may ask follow-up questions in this panel — answer them using the context above.',
   ].join('\n');
+}
+
+/* ---------- panel (window) DOM ---------- */
+
+function panelEl(id) {
+  return explainPanels.querySelector(`.explain-panel[data-id="${id}"]`);
+}
+
+function createPanelEl(node) {
+  const el = document.createElement('div');
+  el.className = 'explain-panel';
+  el.dataset.id = node.id;
+  el.innerHTML = `
+    <div class="selection-quote">"${escapeHtml(node.selection)}"</div>
+    <div class="explain-messages"></div>`;
+  explainPanels.appendChild(el);
+  renderPanelMessages(node);
+  return el;
+}
+
+function renderPanelMessages(node) {
+  const el = panelEl(node.id);
+  if (!el) return;
+  const box = el.querySelector('.explain-messages');
+  box.innerHTML =
+    node.messages.map(messageHtml).join('') ||
+    '<div class="empty">The explanation will appear here.</div>';
+  scrollDown(box);
+}
+
+function activeNode() {
+  return state.explains.nodes[state.explains.activeId] || null;
+}
+
+function childrenOf(id) {
+  return Object.values(state.explains.nodes)
+    .filter((n) => n.parentId === id)
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+function subtreeIds(id) {
+  const out = [id];
+  for (let i = 0; i < out.length; i++) {
+    for (const n of childrenOf(out[i])) out.push(n.id);
+  }
+  return out;
+}
+
+function rootAncestorOf(id) {
+  let n = state.explains.nodes[id];
+  while (n && n.parentId && state.explains.nodes[n.parentId]) {
+    n = state.explains.nodes[n.parentId];
+  }
+  return n || null;
+}
+
+function truncateLabel(s, max = 26) {
+  return s.length > max ? s.slice(0, max).trimEnd() + '…' : s;
+}
+
+/* ---------- rendering: tabs, tree row, input state ---------- */
+
+function renderExplainTabs() {
+  const activeRoot = state.explains.activeId ? rootAncestorOf(state.explains.activeId) : null;
+  explainTabs.innerHTML = state.explains.roots
+    .filter((id) => state.explains.nodes[id])
+    .map((id) => {
+      const n = state.explains.nodes[id];
+      const kids = childrenOf(id).length;
+      return `
+        <button class="explain-tab ${activeRoot && id === activeRoot.id ? 'active' : ''}" data-id="${id}" title="${escapeHtml(n.selection)}">
+          <span class="tab-label">💡 ${escapeHtml(truncateLabel(n.selection))}</span>
+          ${kids ? `<span class="tab-count">${kids}</span>` : ''}
+          <span class="tab-close" data-close="${id}" title="Close this window and its nested ones">✕</span>
+        </button>`;
+    })
+    .join('');
+}
+
+function renderTreeRow() {
+  const node = activeNode();
+  const parts = [];
+
+  if (node && node.parentId && state.explains.nodes[node.parentId]) {
+    const p = state.explains.nodes[node.parentId];
+    parts.push(
+      `<span class="tree-label">In:</span>` +
+        `<button class="tree-chip parent" data-nav="${p.id}" title="${escapeHtml(p.selection)}">↩ <span class="chip-label">${escapeHtml(truncateLabel(p.selection, 22))}</span></button>`
+    );
+  }
+
+  if (node) {
+    const kids = childrenOf(node.id);
+    if (kids.length) {
+      parts.push(
+        `<span class="tree-label">Nested:</span>` +
+          kids
+            .map(
+              (c) =>
+                `<button class="tree-chip child" data-nav="${c.id}" title="${escapeHtml(c.selection)}">💡 <span class="chip-label">${escapeHtml(truncateLabel(c.selection, 22))}</span></button>`
+            )
+            .join('')
+      );
+    }
+  }
+
+  explainTreeRow.innerHTML = parts.join('');
+  explainTreeRow.classList.toggle('hidden', parts.length === 0);
+}
+
+function updateInputState() {
+  const node = activeNode();
+  const disabled = !node || node.busy;
+  sidebarInput.disabled = disabled;
+  sidebarSendBtn.disabled = disabled;
+  sidebarInput.placeholder = node
+    ? 'Ask a follow-up question in this window...'
+    : 'Select text (in chat or in an explain window) to explain...';
+}
+
+function activateExplain(id) {
+  if (!state.explains.nodes[id]) return;
+  state.explains.activeId = id;
+  for (const panel of explainPanels.children) {
+    panel.classList.toggle('active', panel.dataset.id === id);
+  }
+  renderExplainTabs();
+  renderTreeRow();
+  updateInputState();
+  const el = panelEl(id);
+  if (el) scrollDown(el.querySelector('.explain-messages'));
+  persist();
 }
 
 function showSidebar() {
@@ -424,115 +630,189 @@ function showSidebar() {
   rightSidebar.style.width = `${state.sidebar.width}px`;
 }
 
-function hideSidebar() {
+/* Hide the panel but KEEP every window — tabs come back on the next Explain. */
+function hideExplainPanel() {
   state.sidebar.open = false;
   rightSidebar.classList.remove('open');
   rightSidebar.style.width = '0px';
-  // Free Ollama right away instead of finishing a hidden stream.
-  if (state.sidebar.controller) {
-    state.sidebar.controller.abort();
-    state.sidebar.controller = null;
-  }
-  state.sidebar.busy = false;
-  setSidebarInputEnabled(true);
 }
 
-function renderSidebar() {
-  sidebarSelection.innerHTML = state.sidebar.selection
-    ? `<div class="selection-quote">"${escapeHtml(state.sidebar.selection)}"</div>`
-    : '';
-  renderSidebarMessages();
-}
+/* ---------- streaming into a window ---------- */
 
-function renderSidebarMessages() {
-  sidebarMessages.innerHTML =
-    state.sidebar.messages.map(messageHtml).join('') ||
-    '<div class="empty">The explanation will appear here.</div>';
-  scrollDown(sidebarMessages);
-}
-
-/* API payload for the explain session: system prompt + a real user turn
- * (models behave better when the first turn is from the user) + history. */
-function sidebarApiMessages() {
+function explainApiMessages(node) {
   return [
-    { role: 'system', content: state.sidebar.system },
+    { role: 'system', content: node.system },
     { role: 'user', content: 'Explain the selected text above to me.' },
-    ...cleanHistory(state.sidebar.messages),
+    ...cleanHistory(node.messages),
   ];
 }
 
-function openSidebar(selection) {
-  // Abort any previous sidebar stream so stale responses never leak in.
-  if (state.sidebar.controller) state.sidebar.controller.abort();
-  const streamId = ++state.sidebar.streamId;
-  const controller = new AbortController();
-  state.sidebar.controller = controller;
-
-  const system = buildSidebarSystem(selection, state.messages);
-  state.sidebar.selection = selection;
-  state.sidebar.system = system;
-  state.sidebar.messages = [];
-  state.sidebar.busy = true;
-
-  renderSidebar();
-  showSidebar();
-  setSidebarInputEnabled(false);
-
-  const streamer = makeStreamer(sidebarMessages, (full) => {
-    if (streamId !== state.sidebar.streamId) return; // stale stream
-    state.sidebar.busy = false;
-    state.sidebar.controller = null;
-    setSidebarInputEnabled(true);
-    if (full && full.trim()) {
-      state.sidebar.messages.push({ role: 'assistant', content: full });
-    }
-    renderSidebarMessages();
+function finishExplainStream(node, streamId, full) {
+  if (streamId !== node.streamId) return;             // stale stream
+  if (state.explains.nodes[node.id] !== node) return; // window was closed
+  node.busy = false;
+  node.controller = null;
+  if (full && full.trim()) {
+    node.messages.push({ role: 'assistant', content: full });
+  }
+  renderPanelMessages(node);
+  if (state.explains.activeId === node.id) {
+    updateInputState();
     sidebarInput.focus();
-  });
+  }
+  persist();
+}
+
+function startExplainStream(node) {
+  node.busy = true;
+  const streamId = ++node.streamId;
+  const controller = new AbortController();
+  node.controller = controller;
+  updateInputState();
+
+  const el = panelEl(node.id);
+  const box = el ? el.querySelector('.explain-messages') : null;
+  if (!box) { node.busy = false; return; }
+
+  const streamer = makeStreamer(box, (full) => finishExplainStream(node, streamId, full));
   streamer.start();
-  streamChat(sidebarApiMessages(), streamer, controller.signal);
+  streamChat(explainApiMessages(node), streamer, controller.signal);
 }
 
-function setSidebarInputEnabled(on) {
-  sidebarInput.disabled = !on;
-  sidebarSendBtn.disabled = !on;
+/* ---------- window lifecycle ---------- */
+
+function createExplainWindow(selection, parentId = null) {
+  const parent = parentId ? state.explains.nodes[parentId] : null;
+  const effectiveParent = parent ? parent.id : null;
+
+  const id = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const node = {
+    id,
+    parentId: effectiveParent,
+    selection,
+    system: buildExplainSystem(selection, effectiveParent),
+    messages: [],
+    busy: false,
+    streamId: 0,
+    controller: null,
+    createdAt: Date.now(),
+  };
+
+  state.explains.nodes[id] = node;
+  if (effectiveParent === null) state.explains.roots.push(id);
+
+  createPanelEl(node);
+  showSidebar(); // never replaces existing windows
+  activateExplain(id);
+  startExplainStream(node);
 }
 
-function sendSidebar() {
+function closeExplainWindow(id) {
+  const node = state.explains.nodes[id];
+  if (!node) return;
+
+  const doomed = subtreeIds(id);
+  const activeDoomed = doomed.includes(state.explains.activeId);
+
+  // Aborted streams end quietly (finishExplainStream sees the node is gone).
+  for (const did of doomed) {
+    const n = state.explains.nodes[did];
+    if (n && n.controller) n.controller.abort();
+    delete state.explains.nodes[did];
+    const el = panelEl(did);
+    if (el) el.remove();
+  }
+  state.explains.roots = state.explains.roots.filter((r) => !doomed.includes(r));
+
+  if (state.explains.roots.length === 0) {
+    state.explains.activeId = null;
+    hideExplainPanel();
+  } else if (activeDoomed) {
+    const fallback =
+      node.parentId && state.explains.nodes[node.parentId]
+        ? node.parentId
+        : state.explains.roots[state.explains.roots.length - 1];
+    state.explains.activeId = null; // force activateExplain to run
+    activateExplain(fallback);
+  }
+
+  renderExplainTabs();
+  renderTreeRow();
+  updateInputState();
+  persist();
+}
+
+/* Full reset — used when switching/creating conversations (fresh panel). */
+function clearExplainWindows() {
+  for (const n of Object.values(state.explains.nodes)) {
+    if (n.controller) n.controller.abort();
+  }
+  state.explains.nodes = {};
+  state.explains.roots = [];
+  state.explains.activeId = null;
+  explainPanels.innerHTML = '';
+  explainTabs.innerHTML = '';
+  explainTreeRow.innerHTML = '';
+  explainTreeRow.classList.add('hidden');
+  hideExplainPanel();
+  updateInputState();
+}
+
+/* Rebuild windows from a conversation's saved snapshot (no streaming). */
+function restoreExplainWindows(snapshot) {
+  if (!snapshot || !snapshot.nodes) return;
+
+  const saved = Object.values(snapshot.nodes);
+  if (!saved.length) return;
+
+  for (const s of saved.sort((a, b) => a.createdAt - b.createdAt)) {
+    // Orphans (parent lost) are promoted to roots.
+    const parentId = s.parentId && snapshot.nodes[s.parentId] ? s.parentId : null;
+    const node = {
+      id: s.id,
+      parentId,
+      selection: s.selection,
+      system: s.system || buildExplainSystem(s.selection, parentId),
+      messages: Array.isArray(s.messages) ? s.messages : [],
+      busy: false,
+      streamId: 0,
+      controller: null,
+      createdAt: s.createdAt || Date.now(),
+    };
+    state.explains.nodes[node.id] = node;
+    if (parentId === null) state.explains.roots.push(node.id);
+    createPanelEl(node);
+  }
+
+  // Keep only roots that still exist, preserving saved order.
+  const roots = (snapshot.roots || []).filter((r) => state.explains.nodes[r]);
+  for (const r of state.explains.roots) if (!roots.includes(r)) roots.push(r);
+  state.explains.roots = roots;
+
+  if (roots.length === 0) return;
+
+  const activeValid = snapshot.activeId && state.explains.nodes[snapshot.activeId];
+  showSidebar();
+  activateExplain(activeValid ? snapshot.activeId : roots[0]);
+}
+
+function sendExplain() {
+  const node = activeNode();
   const text = sidebarInput.value.trim();
-  if (!text || state.sidebar.busy || !state.sidebar.system) return;
+  if (!node || node.busy || !text) return;
   sidebarInput.value = '';
   autoResize(sidebarInput);
 
-  state.sidebar.messages.push({ role: 'user', content: text });
-  renderSidebarMessages();
-  state.sidebar.busy = true;
-  setSidebarInputEnabled(false);
-
-  if (state.sidebar.controller) state.sidebar.controller.abort();
-  const streamId = ++state.sidebar.streamId;
-  const controller = new AbortController();
-  state.sidebar.controller = controller;
-
-  const streamer = makeStreamer(sidebarMessages, (full) => {
-    if (streamId !== state.sidebar.streamId) return; // stale stream
-    state.sidebar.busy = false;
-    state.sidebar.controller = null;
-    setSidebarInputEnabled(true);
-    if (full && full.trim()) {
-      state.sidebar.messages.push({ role: 'assistant', content: full });
-    }
-    renderSidebarMessages();
-    sidebarInput.focus();
-  });
-  streamer.start();
-  streamChat(sidebarApiMessages(), streamer, controller.signal);
+  node.messages.push({ role: 'user', content: text });
+  renderPanelMessages(node);
+  startExplainStream(node);
 }
 
 /* ================= Text selection popup ================= */
 
-function showPopup(rect, text) {
+function showPopup(rect, text, originId) {
   popup.dataset.text = text;
+  popup.dataset.origin = originId || ''; // '' = main chat (root window)
   popup.style.display = 'block';
   popup.style.left = `${rect.left}px`;
   popup.style.top = `${rect.bottom + 8}px`;
@@ -542,40 +822,55 @@ function hidePopup() {
   popup.style.display = 'none';
 }
 
-messagesEl.addEventListener('mouseup', () => {
-  setTimeout(() => {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) { hidePopup(); return; }
-    const text = sel.toString().trim();
-    if (text.length < 2) { hidePopup(); return; }
-    if (!messagesEl.contains(sel.anchorNode)) { hidePopup(); return; }
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
-    showPopup(rect, text);
-  }, 10);
-});
-
-messagesEl.addEventListener('dblclick', () => {
+function selectionWithin(container) {
   const sel = window.getSelection();
-  if (sel && !sel.isCollapsed) {
-    const text = sel.toString().trim();
-    if (text.length >= 2 && messagesEl.contains(sel.anchorNode)) {
+  if (!sel || sel.isCollapsed) return null;
+  const text = sel.toString().trim();
+  if (text.length < 2) return null;
+  if (!container.contains(sel.anchorNode)) return null;
+  return { sel, text, rect: sel.getRangeAt(0).getBoundingClientRect() };
+}
+
+function makeSelectionHandlers(container, originOf) {
+  container.addEventListener('mouseup', () => {
+    setTimeout(() => {
+      const found = selectionWithin(container);
+      if (!found) { hidePopup(); return; }
+      showPopup(found.rect, found.text, originOf(found.sel.anchorNode));
+    }, 10);
+  });
+
+  container.addEventListener('dblclick', () => {
+    const found = selectionWithin(container);
+    if (found) {
       hidePopup();
-      openSidebar(text);
+      createExplainWindow(found.text, originOf(found.sel.anchorNode) || null);
     }
-  }
+  });
+
+  container.addEventListener('scroll', hidePopup);
+}
+
+/* Main chat selections create ROOT windows. */
+makeSelectionHandlers(messagesEl, () => '');
+
+/* Selections inside an explain window create a CHILD of that window. */
+makeSelectionHandlers(explainPanels, (anchor) => {
+  const el = anchor.nodeType === 1 ? anchor : anchor.parentElement;
+  const panel = el && el.closest('.explain-panel');
+  return panel ? panel.dataset.id : '';
 });
 
 popup.addEventListener('click', () => {
   const text = popup.dataset.text;
+  const origin = popup.dataset.origin || '';
   hidePopup();
-  if (text) openSidebar(text);
+  if (text) createExplainWindow(text, origin || null);
 });
 
 document.addEventListener('mousedown', (e) => {
   if (!popup.contains(e.target)) hidePopup();
 });
-
-messagesEl.addEventListener('scroll', hidePopup);
 
 /* ================= Resize handle ================= */
 
@@ -642,10 +937,10 @@ input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
-sidebarInputForm.addEventListener('submit', (e) => { e.preventDefault(); sendSidebar(); });
+sidebarInputForm.addEventListener('submit', (e) => { e.preventDefault(); sendExplain(); });
 sidebarInput.addEventListener('input', () => autoResize(sidebarInput));
 sidebarInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendSidebar(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendExplain(); }
 });
 
 newChatBtn.addEventListener('click', async () => {
@@ -661,13 +956,35 @@ convList.addEventListener('click', (e) => {
   if (item) selectConversation(item.dataset.id);
 });
 
-sidebarClose.addEventListener('click', hideSidebar);
+/* Hide panel — windows are preserved and reappear on the next Explain. */
+sidebarClose.addEventListener('click', hideExplainPanel);
 
+/* Clear only the active window's conversation (keeps selection + tree). */
 sidebarReset.addEventListener('click', () => {
-  if (state.sidebar.busy) return;
-  state.sidebar.messages = [];
-  renderSidebarMessages();
+  const node = activeNode();
+  if (!node || node.busy) return;
+  node.messages = [];
+  renderPanelMessages(node);
+  persist();
   sidebarInput.focus();
+});
+
+/* Tab strip: switch between root windows, or close one (with its children). */
+explainTabs.addEventListener('click', (e) => {
+  const close = e.target.closest('[data-close]');
+  if (close) {
+    e.stopPropagation();
+    closeExplainWindow(close.dataset.close);
+    return;
+  }
+  const tab = e.target.closest('.explain-tab');
+  if (tab) activateExplain(tab.dataset.id);
+});
+
+/* Tree row: navigate to parent / nested child windows. */
+explainTreeRow.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-nav]');
+  if (chip) activateExplain(chip.dataset.nav);
 });
 
 /* ================= Init ================= */

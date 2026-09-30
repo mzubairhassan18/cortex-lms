@@ -37,19 +37,19 @@
     <!-- Drag handle to resize the explain sidebar -->
     <div id="resize-handle"></div>
 
-    <!-- Right sidebar: explain / separate session -->
+    <!-- Right sidebar: explain windows (tree of sessions) -->
     <aside id="right-sidebar">
       <div id="sidebar-header">
-        <div class="sidebar-title">💡 Explain</div>
+        <div id="explain-tabs" title="Explain windows (created from the main chat)"></div>
         <div class="sidebar-actions">
-          <button id="sidebar-reset" title="Clear this explanation session">↺</button>
-          <button id="sidebar-close" title="Close sidebar">✕</button>
+          <button id="sidebar-reset" title="Clear this window's conversation">↺</button>
+          <button id="sidebar-close" title="Hide panel (windows are kept)">✕</button>
         </div>
       </div>
-      <div id="sidebar-selection"></div>
-      <div id="sidebar-messages"></div>
+      <div id="explain-tree-row" class="hidden"></div>
+      <div id="explain-panels"></div>
       <form id="sidebar-input-form">
-        <textarea id="sidebar-input" rows="1" placeholder="Ask a follow-up question..."></textarea>
+        <textarea id="sidebar-input" rows="1" placeholder="Select text to explain..."></textarea>
         <button type="submit" id="sidebar-send-btn" title="Send">➤</button>
       </form>
     </aside>

@@ -64,6 +64,8 @@ app.put('/api/conversations/:id', (req, res) => {
   const conv = list.find((c) => c.id === req.params.id);
   if (!conv) return res.status(404).json({ error: 'Not found' });
   conv.messages = Array.isArray(req.body.messages) ? req.body.messages : [];
+  // Snapshot of explain windows (tree of sessions) for this conversation.
+  if ('explains' in req.body) conv.explains = req.body.explains || null;
   conv.updatedAt = Date.now();
   const firstUser = conv.messages.find((m) => m.role === 'user');
   if (firstUser && (!conv.title || conv.title === 'New conversation')) {
