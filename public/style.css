@@ -219,7 +219,7 @@ body {
 
 /* ---------------- Input forms ---------------- */
 
-#input-form, #sidebar-input-form {
+#input-form {
   display: flex;
   gap: 10px;
   padding: 14px 20px;
@@ -227,7 +227,7 @@ body {
   background: var(--bg);
 }
 
-#input, #sidebar-input {
+#input {
   flex: 1;
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -241,10 +241,10 @@ body {
   max-height: 200px;
   line-height: 1.4;
 }
-#input:focus, #sidebar-input:focus { border-color: var(--accent); }
-#input:disabled, #sidebar-input:disabled { opacity: 0.5; }
+#input:focus { border-color: var(--accent); }
+#input:disabled { opacity: 0.5; }
 
-#send-btn, #sidebar-send-btn {
+#send-btn {
   background: var(--accent);
   color: var(--bg-panel);
   border: none;
@@ -255,8 +255,35 @@ body {
   font-size: 16px;
   transition: opacity 0.15s;
 }
-#send-btn:hover:not(:disabled), #sidebar-send-btn:hover:not(:disabled) { opacity: 0.85; }
-#send-btn:disabled, #sidebar-send-btn:disabled { opacity: 0.4; cursor: default; }
+#send-btn:hover:not(:disabled) { opacity: 0.85; }
+#send-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Header button that reopens the explain panel */
+#explains-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+#explains-toggle:hover { background: var(--accent); color: var(--bg-panel); }
+#explains-toggle.on { background: var(--accent); color: var(--bg-panel); }
+#explains-toggle.on #explains-count { background: rgba(17, 17, 27, 0.25); }
+#explains-toggle.hidden { display: none; }
+#explains-count {
+  background: rgba(137, 180, 250, 0.25);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+}
 
 /* ---------------- Resize handle ---------------- */
 
@@ -358,84 +385,187 @@ body {
 }
 .sidebar-actions button:hover { background: var(--user-bubble); color: var(--text); }
 
-/* Tree row: parent + nested-children links, shown above the active window */
-#explain-tree-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-panel);
-}
-#explain-tree-row.hidden { display: none; }
+/*
+ * Nested explain panels: a vertical stack of rows (depth-first tree order).
+ * Each row is indented by depth, resizable to a few-pixel line when collapsed.
+ * The active row gets the standard space; all others collapse to lines.
+ */
 
-.tree-label {
-  font-size: 11px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.tree-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  max-width: 220px;
-  background: var(--bg-alt);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  overflow: hidden;
-}
-.tree-chip:hover { border-color: var(--accent); }
-.tree-chip .chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-chip.parent { border-style: dashed; color: var(--text-dim); }
-.tree-chip.child { border-left: 3px solid var(--accent2); }
-
-/* One panel per explain window; only the active one is displayed */
 #explain-panels {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
+/* Horizontal resize handle between two rows */
+.ep-resize {
+  flex: none;
+  height: 5px;
+  cursor: row-resize;
+  background: var(--border);
+  transition: background 0.12s;
+  position: relative;
+}
+.ep-resize:hover, .ep-resize.dragging { background: var(--accent); }
+.ep-resize::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 1px;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--text-dim);
+  opacity: 0.45;
+}
+.ep-resize:hover::after, .ep-resize.dragging::after { opacity: 1; background: var(--bg-panel); }
+
+/* One row per explain window */
 .explain-panel {
-  display: none;
-  flex: 1;
-  min-height: 0;
-  flex-direction: column;
-}
-.explain-panel.active { display: flex; }
-
-.selection-quote {
-  margin: 12px 14px 0;
-  padding: 10px 12px;
-  background: var(--bg-panel);
-  border-left: 3px solid var(--accent2);
-  border-radius: 6px;
-  font-size: 13px;
-  font-style: italic;
-  color: var(--text-dim);
-  max-height: 110px;
-  overflow-y: auto;
-  line-height: 1.5;
-  flex-shrink: 0;
-}
-
-.explain-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 14px;
+  flex: none;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  min-height: 0;
+  position: relative;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-alt);
 }
 
-.explain-messages .bubble { max-width: 88%; font-size: 14px; }
+/* Depth indentation: children sit visually inside their parent */
+.explain-panel[data-depth]:not([data-depth="0"]) {
+  margin-left: 14px;
+  border-left: 2px solid var(--accent2);
+}
+
+/* Collapsed state: the row is just a thin line (a few pixels) */
+.explain-panel.collapsed { min-height: 4px; border-bottom-color: transparent; }
+.explain-panel.collapsed > :not(.ep-line) { display: none !important; }
+
+/* The line shown when collapsed — click to expand/activate */
+.ep-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: none;
+  cursor: pointer;
+  background: linear-gradient(to bottom, var(--border), var(--text-dim));
+  opacity: 0.55;
+  z-index: 2;
+}
+.explain-panel.collapsed > .ep-line { display: block; }
+.ep-line:hover { opacity: 1; background: var(--accent); }
+
+/* Row header: selection quote + actions */
+.ep-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+.explain-panel.active .ep-head {
+  background: var(--bg-panel);
+  border-bottom-color: var(--accent);
+}
+.ep-head .ep-quote {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-dim);
+}
+.explain-panel.active .ep-quote { color: var(--text); }
+.ep-head .ep-badge {
+  flex: none;
+  background: rgba(166, 227, 161, 0.2);
+  color: var(--accent2);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.ep-head .ep-busy {
+  flex: none;
+  color: var(--accent);
+  font-size: 11px;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.ep-head .ep-btn {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.ep-head .ep-btn:hover { background: var(--user-bubble); color: var(--text); }
+.ep-head .ep-btn.ep-close:hover { color: var(--danger); }
+
+/* Messages area of a row */
+.explain-messages {
+  flex: 1;
+  min-height: 60px;
+  overflow-y: auto;
+  padding: 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.explain-messages .bubble { max-width: 92%; font-size: 13px; padding: 9px 12px; }
+.explain-messages .empty { padding: 20px 10px; font-size: 13px; }
+
+/* Per-row input */
+.ep-input-form {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.ep-input {
+  flex: 1;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  max-height: 120px;
+  line-height: 1.4;
+}
+.ep-input:focus { border-color: var(--accent); }
+.ep-input:disabled { opacity: 0.5; }
+.ep-send {
+  flex: none;
+  width: 36px;
+  background: var(--accent);
+  color: var(--bg-panel);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.ep-send:hover:not(:disabled) { opacity: 0.85; }
+.ep-send:disabled { opacity: 0.4; cursor: default; }
 
 /* ---------------- Selection popup ---------------- */
 

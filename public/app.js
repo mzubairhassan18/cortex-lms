@@ -38,11 +38,9 @@ const sendBtn = $('send-btn');
 const resizeHandle = $('resize-handle');
 const rightSidebar = $('right-sidebar');
 const explainTabs = $('explain-tabs');
-const explainTreeRow = $('explain-tree-row');
 const explainPanels = $('explain-panels');
-const sidebarInputForm = $('sidebar-input-form');
-const sidebarInput = $('sidebar-input');
-const sidebarSendBtn = $('sidebar-send-btn');
+const explainsToggle = $('explains-toggle');
+const explainsCount = $('explains-count');
 const sidebarClose = $('sidebar-close');
 const sidebarReset = $('sidebar-reset');
 const popup = $('selection-popup');
@@ -333,6 +331,7 @@ function explainSnapshot() {
       system: n.system,
       messages: n.messages,
       createdAt: n.createdAt,
+      h: n.h, // layout: 'auto' (expanded) or pixel height (incl. 4px collapsed line)
     };
   }
   return {
@@ -499,15 +498,137 @@ function panelEl(id) {
 }
 
 function createPanelEl(node) {
+  const depth = depthOf(node);
   const el = document.createElement('div');
   el.className = 'explain-panel';
   el.dataset.id = node.id;
+  el.dataset.depth = String(depth);
   el.innerHTML = `
-    <div class="selection-quote">"${escapeHtml(node.selection)}"</div>
-    <div class="explain-messages"></div>`;
+    <div class="ep-line" title="Click to open: ${escapeHtml(node.selection)}"></div>
+    <div class="ep-head">
+      <span class="ep-quote">💡 "${escapeHtml(node.selection)}"</span>
+      <span class="ep-badge" hidden></span>
+      <span class="ep-busy" hidden>●●●</span>
+      <button class="ep-btn ep-close" title="Close this window and its nested ones">✕</button>
+    </div>
+    <div class="explain-messages"></div>
+    <form class="ep-input-form">
+      <textarea class="ep-input" rows="1" placeholder="Ask a follow-up question..."></textarea>
+      <button type="submit" class="ep-send" title="Send">➤</button>
+    </form>`;
   explainPanels.appendChild(el);
   renderPanelMessages(node);
+  updateRowState(node);
   return el;
+}
+
+function depthOf(node) {
+  let d = 0;
+  let n = node;
+  while (n.parentId && state.explains.nodes[n.parentId] && d < 20) {
+    n = state.explains.nodes[n.parentId];
+    d++;
+  }
+  return d;
+}
+
+/* Depth-first order: root, its descendants, next root — the visual stack. */
+function dfsOrder() {
+  const out = [];
+  const seen = new Set();
+  const visit = (id) => {
+    if (seen.has(id) || !state.explains.nodes[id]) return;
+    seen.add(id);
+    out.push(id);
+    for (const c of childrenOf(id)) visit(c.id);
+  };
+  for (const r of state.explains.roots) visit(r);
+  for (const id of Object.keys(state.explains.nodes)) if (!seen.has(id)) visit(id);
+  return out;
+}
+
+/* Reorder DOM rows into DFS order (elements are MOVED, never rebuilt, so
+ * in-flight typewriter streams keep their message containers). */
+function reorderRows() {
+  const order = dfsOrder();
+  let first = true;
+  for (const id of order) {
+    const row = panelEl(id);
+    if (!row) continue;
+    if (first) {
+      if (row._handle) row._handle.remove();
+    } else {
+      if (!row._handle) {
+        row._handle = document.createElement('div');
+        row._handle.className = 'ep-resize';
+      }
+      explainPanels.appendChild(row._handle);
+    }
+    explainPanels.appendChild(row);
+    first = false;
+  }
+}
+
+const EP_MIN = 4; // collapsed line height in pixels
+
+/*
+ * Height engine: 'auto' rows split the leftover space equally; pixel rows
+ * (dragged or collapsed lines) are fixed. Collapsed = EP_MIN line.
+ */
+function applyLayout() {
+  if (!state.sidebar.open) return;
+  const order = dfsOrder();
+  const rows = order.map(panelEl).filter(Boolean);
+  if (!rows.length) return;
+
+  const H = explainPanels.clientHeight || 600;
+  let pxSum = 0;
+  let autoCount = 0;
+  for (const id of order) {
+    const n = state.explains.nodes[id];
+    if (!n) continue;
+    if (n.h === 'auto') autoCount++;
+    else pxSum += typeof n.h === 'number' ? n.h : EP_MIN;
+  }
+  // Account for the resize handles between rows (5px each).
+  pxSum += Math.max(0, rows.length - 1) * 5;
+  const share = autoCount > 0 ? Math.max(160, (H - pxSum) / autoCount) : 0;
+
+  for (const row of rows) {
+    const n = state.explains.nodes[row.dataset.id];
+    if (!n) continue;
+    const h = n.h === 'auto' ? share : (typeof n.h === 'number' ? n.h : EP_MIN);
+    row.style.height = h + 'px';
+    row.classList.toggle('collapsed', h <= 8);
+    row.classList.toggle('active', state.explains.activeId === n.id);
+  }
+}
+
+function updateRowState(node) {
+  const row = panelEl(node.id);
+  if (!row) return;
+  const kids = childrenOf(node.id).length;
+  const badge = row.querySelector('.ep-badge');
+  badge.hidden = kids === 0;
+  badge.textContent = kids ? `${kids} nested` : '';
+  row.querySelector('.ep-busy').hidden = !node.busy;
+  const ta = row.querySelector('.ep-input');
+  const btn = row.querySelector('.ep-send');
+  ta.disabled = !!node.busy;
+  btn.disabled = !!node.busy;
+  row.querySelector('.ep-line').title = `Click to open: ${node.selection}`;
+}
+
+function updateRowStates() {
+  for (const n of Object.values(state.explains.nodes)) updateRowState(n);
+}
+
+/* Header button: shows how many windows exist and reopens the panel. */
+function updateExplainToggle() {
+  const count = Object.keys(state.explains.nodes).length;
+  explainsCount.textContent = String(count);
+  explainsToggle.classList.toggle('hidden', count === 0);
+  explainsToggle.classList.toggle('on', state.sidebar.open);
 }
 
 function renderPanelMessages(node) {
@@ -550,7 +671,7 @@ function truncateLabel(s, max = 26) {
   return s.length > max ? s.slice(0, max).trimEnd() + '…' : s;
 }
 
-/* ---------- rendering: tabs, tree row, input state ---------- */
+/* ---------- rendering: tabs + row state ---------- */
 
 function renderExplainTabs() {
   const activeRoot = state.explains.activeId ? rootAncestorOf(state.explains.activeId) : null;
@@ -569,72 +690,41 @@ function renderExplainTabs() {
     .join('');
 }
 
-function renderTreeRow() {
-  const node = activeNode();
-  const parts = [];
-
-  if (node && node.parentId && state.explains.nodes[node.parentId]) {
-    const p = state.explains.nodes[node.parentId];
-    parts.push(
-      `<span class="tree-label">In:</span>` +
-        `<button class="tree-chip parent" data-nav="${p.id}" title="${escapeHtml(p.selection)}">↩ <span class="chip-label">${escapeHtml(truncateLabel(p.selection, 22))}</span></button>`
-    );
-  }
-
-  if (node) {
-    const kids = childrenOf(node.id);
-    if (kids.length) {
-      parts.push(
-        `<span class="tree-label">Nested:</span>` +
-          kids
-            .map(
-              (c) =>
-                `<button class="tree-chip child" data-nav="${c.id}" title="${escapeHtml(c.selection)}">💡 <span class="chip-label">${escapeHtml(truncateLabel(c.selection, 22))}</span></button>`
-            )
-            .join('')
-      );
-    }
-  }
-
-  explainTreeRow.innerHTML = parts.join('');
-  explainTreeRow.classList.toggle('hidden', parts.length === 0);
-}
-
-function updateInputState() {
-  const node = activeNode();
-  const disabled = !node || node.busy;
-  sidebarInput.disabled = disabled;
-  sidebarSendBtn.disabled = disabled;
-  sidebarInput.placeholder = node
-    ? 'Ask a follow-up question in this window...'
-    : 'Select text (in chat or in an explain window) to explain...';
-}
-
-function activateExplain(id) {
+/* Activate a window: it gets the standard space, every other panel collapses
+ * to a few-pixel line (they can be clicked or dragged back open). */
+function activateExplain(id, persistIt = true) {
   if (!state.explains.nodes[id]) return;
   state.explains.activeId = id;
-  for (const panel of explainPanels.children) {
-    panel.classList.toggle('active', panel.dataset.id === id);
+  for (const n of Object.values(state.explains.nodes)) {
+    n.h = n.id === id ? 'auto' : EP_MIN;
   }
   renderExplainTabs();
-  renderTreeRow();
-  updateInputState();
+  updateExplainToggle();
+  applyLayout();
+  updateRowStates();
   const el = panelEl(id);
-  if (el) scrollDown(el.querySelector('.explain-messages'));
-  persist();
+  if (el) {
+    el.scrollIntoView({ block: 'nearest' });
+    scrollDown(el.querySelector('.explain-messages'));
+  }
+  if (persistIt) persist();
 }
 
 function showSidebar() {
   state.sidebar.open = true;
   rightSidebar.classList.add('open');
   rightSidebar.style.width = `${state.sidebar.width}px`;
+  updateExplainToggle();
+  applyLayout();
 }
 
-/* Hide the panel but KEEP every window — tabs come back on the next Explain. */
+/* Hide the panel but KEEP every window — reopen via the header button or a
+ * new Explain. */
 function hideExplainPanel() {
   state.sidebar.open = false;
   rightSidebar.classList.remove('open');
   rightSidebar.style.width = '0px';
+  updateExplainToggle();
 }
 
 /* ---------- streaming into a window ---------- */
@@ -656,9 +746,11 @@ function finishExplainStream(node, streamId, full) {
     node.messages.push({ role: 'assistant', content: full });
   }
   renderPanelMessages(node);
+  updateRowState(node);
   if (state.explains.activeId === node.id) {
-    updateInputState();
-    sidebarInput.focus();
+    const el = panelEl(node.id);
+    const ta = el && el.querySelector('.ep-input');
+    if (ta) ta.focus();
   }
   persist();
 }
@@ -668,7 +760,7 @@ function startExplainStream(node) {
   const streamId = ++node.streamId;
   const controller = new AbortController();
   node.controller = controller;
-  updateInputState();
+  updateRowState(node);
 
   const el = panelEl(node.id);
   const box = el ? el.querySelector('.explain-messages') : null;
@@ -696,12 +788,14 @@ function createExplainWindow(selection, parentId = null) {
     streamId: 0,
     controller: null,
     createdAt: Date.now(),
+    h: 'auto',
   };
 
   state.explains.nodes[id] = node;
   if (effectiveParent === null) state.explains.roots.push(id);
 
   createPanelEl(node);
+  reorderRows(); // place the row inside its parent's block (DFS order)
   showSidebar(); // never replaces existing windows
   activateExplain(id);
   startExplainStream(node);
@@ -720,7 +814,10 @@ function closeExplainWindow(id) {
     if (n && n.controller) n.controller.abort();
     delete state.explains.nodes[did];
     const el = panelEl(did);
-    if (el) el.remove();
+    if (el) {
+      if (el._handle) el._handle.remove();
+      el.remove();
+    }
   }
   state.explains.roots = state.explains.roots.filter((r) => !doomed.includes(r));
 
@@ -736,9 +833,11 @@ function closeExplainWindow(id) {
     activateExplain(fallback);
   }
 
+  reorderRows();
   renderExplainTabs();
-  renderTreeRow();
-  updateInputState();
+  updateExplainToggle();
+  updateRowStates();
+  applyLayout();
   persist();
 }
 
@@ -752,10 +851,8 @@ function clearExplainWindows() {
   state.explains.activeId = null;
   explainPanels.innerHTML = '';
   explainTabs.innerHTML = '';
-  explainTreeRow.innerHTML = '';
-  explainTreeRow.classList.add('hidden');
   hideExplainPanel();
-  updateInputState();
+  updateExplainToggle();
 }
 
 /* Rebuild windows from a conversation's saved snapshot (no streaming). */
@@ -778,6 +875,7 @@ function restoreExplainWindows(snapshot) {
       streamId: 0,
       controller: null,
       createdAt: s.createdAt || Date.now(),
+      h: s.h === 'auto' || typeof s.h === 'number' ? s.h : EP_MIN,
     };
     state.explains.nodes[node.id] = node;
     if (parentId === null) state.explains.roots.push(node.id);
@@ -791,20 +889,36 @@ function restoreExplainWindows(snapshot) {
 
   if (roots.length === 0) return;
 
+  reorderRows();
+
+  // Restore layout: active window expanded, saved heights for the rest.
   const activeValid = snapshot.activeId && state.explains.nodes[snapshot.activeId];
+  const activeId = activeValid ? snapshot.activeId : roots[0];
+  state.explains.activeId = activeId;
+  for (const n of Object.values(state.explains.nodes)) {
+    if (n.id === activeId) n.h = 'auto';
+    else if (!(n.h === 'auto' || typeof n.h === 'number')) n.h = EP_MIN;
+  }
+
   showSidebar();
-  activateExplain(activeValid ? snapshot.activeId : roots[0]);
+  renderExplainTabs();
+  updateExplainToggle();
+  applyLayout();
+  updateRowStates();
+  persist();
 }
 
-function sendExplain() {
-  const node = activeNode();
-  const text = sidebarInput.value.trim();
+function sendExplain(row) {
+  const node = state.explains.nodes[row.dataset.id];
+  const ta = row.querySelector('.ep-input');
+  const text = ta.value.trim();
   if (!node || node.busy || !text) return;
-  sidebarInput.value = '';
-  autoResize(sidebarInput);
+  ta.value = '';
+  autoResize(ta);
 
   node.messages.push({ role: 'user', content: text });
   renderPanelMessages(node);
+  scrollDown(row.querySelector('.explain-messages'));
   startExplainStream(node);
 }
 
@@ -937,11 +1051,92 @@ input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
-sidebarInputForm.addEventListener('submit', (e) => { e.preventDefault(); sendExplain(); });
-sidebarInput.addEventListener('input', () => autoResize(sidebarInput));
-sidebarInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendExplain(); }
+/* ---------- Explain panel: delegated interactions ---------- */
+
+/* Per-row input: submit / Enter. */
+explainPanels.addEventListener('submit', (e) => {
+  const form = e.target.closest('.ep-input-form');
+  if (!form) return;
+  e.preventDefault();
+  sendExplain(form.closest('.explain-panel'));
 });
+explainPanels.addEventListener('keydown', (e) => {
+  if (!e.target.classList || !e.target.classList.contains('ep-input')) return;
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendExplain(e.target.closest('.explain-panel'));
+  }
+});
+explainPanels.addEventListener('input', (e) => {
+  if (e.target.classList && e.target.classList.contains('ep-input')) autoResize(e.target);
+});
+
+/* Click a collapsed line or a header to activate a window; ✕ closes it. */
+explainPanels.addEventListener('click', (e) => {
+  const close = e.target.closest('.ep-close');
+  if (close) {
+    e.stopPropagation();
+    closeExplainWindow(close.closest('.explain-panel').dataset.id);
+    return;
+  }
+  const row = e.target.closest('.explain-panel');
+  if (row && (e.target.closest('.ep-line') || e.target.closest('.ep-head'))) {
+    activateExplain(row.dataset.id);
+  }
+});
+
+/* Drag the handle between two rows to resize them (min = few-pixel line). */
+explainPanels.addEventListener('mousedown', (e) => {
+  const handle = e.target.closest('.ep-resize');
+  if (!handle) return;
+  e.preventDefault();
+  handle.classList.add('dragging');
+
+  const rows = dfsOrder().map(panelEl).filter(Boolean);
+  const belowRow = handle.nextElementSibling;
+  const aboveRow = handle.previousElementSibling;
+  if (!belowRow || !aboveRow || !belowRow.classList.contains('explain-panel') ||
+      !aboveRow.classList.contains('explain-panel')) {
+    handle.classList.remove('dragging');
+    return;
+  }
+
+  const aNode = state.explains.nodes[aboveRow.dataset.id];
+  const bNode = state.explains.nodes[belowRow.dataset.id];
+  if (!aNode || !bNode) { handle.classList.remove('dragging'); return; }
+
+  const a0 = aboveRow.offsetHeight;
+  const b0 = belowRow.offsetHeight;
+  aNode.h = a0; // freeze 'auto' rows to pixels for the drag
+  bNode.h = b0;
+  const total = a0 + b0;
+  const startY = e.clientY;
+
+  const onMove = (ev) => {
+    const dy = ev.clientY - startY;
+    // Drag up => above shrinks, below grows (and vice versa).
+    const b = Math.min(total - EP_MIN, Math.max(EP_MIN, b0 - dy));
+    bNode.h = total - b > EP_MIN ? b : total - EP_MIN;
+    aNode.h = total - bNode.h;
+    applyLayout();
+  };
+  const onUp = () => {
+    handle.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    persist();
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+});
+
+/* Header button: show/hide the explain panel without touching the windows. */
+explainsToggle.addEventListener('click', () => {
+  if (state.sidebar.open) hideExplainPanel();
+  else showSidebar();
+});
+
+window.addEventListener('resize', () => applyLayout());
 
 newChatBtn.addEventListener('click', async () => {
   if (state.streaming) return;
@@ -966,7 +1161,9 @@ sidebarReset.addEventListener('click', () => {
   node.messages = [];
   renderPanelMessages(node);
   persist();
-  sidebarInput.focus();
+  const el = panelEl(node.id);
+  const ta = el && el.querySelector('.ep-input');
+  if (ta) ta.focus();
 });
 
 /* Tab strip: switch between root windows, or close one (with its children). */
@@ -979,12 +1176,6 @@ explainTabs.addEventListener('click', (e) => {
   }
   const tab = e.target.closest('.explain-tab');
   if (tab) activateExplain(tab.dataset.id);
-});
-
-/* Tree row: navigate to parent / nested child windows. */
-explainTreeRow.addEventListener('click', (e) => {
-  const chip = e.target.closest('[data-nav]');
-  if (chip) activateExplain(chip.dataset.nav);
 });
 
 /* ================= Init ================= */
