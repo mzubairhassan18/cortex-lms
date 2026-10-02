@@ -180,12 +180,9 @@ function renderMarkdown(src) {
 }
 
 /* Learning Bot badge shown at the top-left edge of assistant responses. */
-const AVATAR_SVG =
-  '<svg viewBox="0 0 24 24" aria-hidden="true">' +
-  '<path d="M12 4 2.5 8.6 12 13.2 21.5 8.6 12 4Z" fill="#11111b"/>' +
-  '<path d="M6.5 11.2V15c0 1.5 2.5 2.8 5.5 2.8s5.5-1.3 5.5-2.8v-3.8" fill="none" stroke="#11111b" stroke-width="1.7" stroke-linecap="round"/>' +
-  '<path d="M20.6 9.3v4.6" fill="none" stroke="#11111b" stroke-width="1.6" stroke-linecap="round"/>' +
-  '</svg>';
+/* The exact mark from the app header ("🎓 Learning Bot") — shown above
+ * each response as-is, no badge background. */
+const AVATAR_MARK = '🎓';
 
 function messageHtml(m, i, scope) {
   const isUser = m.role === 'user';
@@ -193,7 +190,7 @@ function messageHtml(m, i, scope) {
   if (isUser) return `<div class="msg user">${bubble}</div>`;
   return (
     `<div class="msg assistant">` +
-    `<span class="msg-avatar" title="Learning Bot">${AVATAR_SVG}</span>` +
+    `<span class="msg-avatar" title="Learning Bot">${AVATAR_MARK}</span>` +
     `<div class="msg-body">${bubble}` +
     `<button type="button" class="msg-copy" data-i="${i}"${scope ? ` data-scope="${scope}"` : ''} title="Copy the whole response">⧉ Copy</button>` +
     `</div></div>`
@@ -296,7 +293,7 @@ function makeStreamer(container, onFinish) {
       const av = document.createElement('span');
       av.className = 'msg-avatar';
       av.title = 'Learning Bot';
-      av.innerHTML = AVATAR_SVG;
+      av.innerHTML = AVATAR_MARK;
       wrap.appendChild(av);
       const body = document.createElement('div');
       body.className = 'msg-body';
@@ -1067,6 +1064,10 @@ function hideExplainPanel() {
   state.sidebar.open = false;
   rightSidebar.classList.remove('open');
   rightSidebar.style.width = '0px';
+  // The panel is fully closed: no overlay may keep its active button
+  // state (Summary/Library would otherwise stay "on" with no panel).
+  setSummaryOverlay(false);
+  closeLibrary(false);
   updateExplainToggle();
 }
 

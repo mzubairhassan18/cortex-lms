@@ -263,16 +263,15 @@ body.compact-header #model-select {
 }
 .msg-avatar {
   flex: none;
-  align-self: flex-start; /* keep the 26px badge in the column layout */
+  align-self: flex-start; /* keep it in place in the column layout */
   width: 26px;
   height: 26px;
-  border-radius: 7px;
-  background: var(--accent);
+  font-size: 19px; /* same 🎓 as the header — no badge background */
+  line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-.msg-avatar svg { width: 17px; height: 17px; display: block; }
 .msg-body { min-width: 0; }
 .msg-copy {
   background: none;
