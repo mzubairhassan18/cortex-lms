@@ -99,6 +99,16 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Context window + limits for the active model (combined when Auto). */
+#footer-info {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+  margin-top: -3px;
+}
+#footer-info[hidden] { display: none; }
 #settings-btn {
   background: var(--bg);
   border: 1px solid var(--border);

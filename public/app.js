@@ -4,6 +4,8 @@
 
 const state = {
   model: 'phi4-mini-fast:latest',
+  autoRoute: null,           // {provider,label,model,info} — server-chosen source (Auto)
+  modelInfo: null,           // {context,limits,text,title} — footer info line
   conversations: [],
   currentId: null,
   messages: [],            // main chat messages
@@ -64,6 +66,7 @@ const setBase = $('set-base');
 const setConnect = $('set-connect');
 const setMessage = $('set-message');
 const footerModel = $('footer-model');
+const footerInfo = $('footer-info');
 const popup = $('selection-popup');
 
 /* ================= Safe markdown rendering ================= */
@@ -293,7 +296,16 @@ async function streamChat(messages, streamer, signal, opts) {
           if (payload === '[DONE]') continue;
           try {
             const json = JSON.parse(payload);
-            if (json.error) serverError = json.error;
+            if (json.route) {
+              // Server picked the source (Auto routing) — refresh the footer.
+              state.autoRoute = json.route;
+              // Auto keeps the combined pool info in the info line; single
+              // providers show the serving model's context/limits.
+              if (json.route.info && appSettings.provider !== 'auto') {
+                state.modelInfo = json.route.info;
+              }
+              updateFooterModel();
+            } else if (json.error) serverError = json.error;
             else if (json.delta) {
               receivedAny = true;
               streamer.push(json.delta);
@@ -1316,7 +1328,10 @@ function renderSettingsForm() {
 function syncProviderFields() {
   const meta = providerMeta(setProvider.value);
   const needsKey = meta.needsKey !== false;
+  const isAuto = meta.kind === 'auto';
   $('set-key-row').style.display = needsKey ? '' : 'none';
+  const baseRow = $('set-base-row');
+  if (baseRow) baseRow.style.display = isAuto ? 'none' : '';
   setKey.value = '';
   const sameProvider = setProvider.value === appSettings.provider;
   setKey.placeholder = !needsKey
@@ -1324,7 +1339,10 @@ function syncProviderFields() {
     : sameProvider && appSettings.apiKeySet
       ? '•••••• saved — type to replace'
       : 'sk-…';
-  if (setBase.dataset.touched !== '1') {
+  if (isAuto) {
+    setBase.value = '';
+    delete setBase.dataset.touched;
+  } else if (setBase.dataset.touched !== '1') {
     // Pick the provider's base URL automatically (editable if overridden).
     setBase.value = sameProvider
       ? appSettings.baseUrl || meta.defaultBaseUrl || ''
@@ -1365,10 +1383,16 @@ async function connectProvider() {
     appSettings = { ...d };
     delete appSettings.models; // settingsView only — models go to the dropdown
     delete setBase.dataset.touched;
+    state.autoRoute = null; // re-routing from scratch after a settings change
 
     applyModels(d.models || []);
     setMessage.className = 'set-message ok';
-    setMessage.textContent = `✓ Connected — ${(d.models || []).length} model(s) available`;
+    if (d.autoSources && d.autoSources.length) {
+      const names = d.autoSources.map((x) => x.label.replace(/\s*\(.*\)\s*/, '')).join(', ');
+      setMessage.textContent = `✓ Auto ready — ${d.autoSources.length} source(s): ${names}`;
+    } else {
+      setMessage.textContent = `✓ Connected — ${(d.models || []).length} model(s) available`;
+    }
     settingsStatus.textContent = '✓';
     updateFooterModel();
   } catch (e) {
@@ -1383,14 +1407,68 @@ setConnect.addEventListener('click', connectProvider);
 
 /* Left-sidebar footer: which provider + model is active. */
 function updateFooterModel() {
-  if (!footerModel) return;
-  const label = providerMeta(appSettings.provider).label;
-  footerModel.textContent = `${label} · ${state.model}`;
-  footerModel.title = `Provider: ${label}\nModel: ${state.model}`;
+  if (footerModel) {
+    const meta = providerMeta(appSettings.provider);
+    const label = meta.label;
+    if (meta.kind === 'auto') {
+      const r = state.autoRoute;
+      footerModel.textContent = r
+        ? `Auto · ${r.label} · ${r.model}`
+        : 'Auto · picks a working model per message';
+      footerModel.title = r
+        ? `Auto routing\nServing now: ${r.label}\nModel: ${r.model}` +
+            (r.info && r.info.context ? `\nContext: ${r.info.context}` : '')
+        : `${label}\nSend a message — the server probes for a source that answers.`;
+    } else {
+      footerModel.textContent = `${label} · ${state.model}`;
+      footerModel.title = `Provider: ${label}\nModel: ${state.model}`;
+    }
+  }
+  updateFooterInfo();
+}
+
+/* Info line above ⚙ Settings: the active model's context window and usage
+ * limits — combined across sources when Auto is selected. */
+function updateFooterInfo() {
+  if (!footerInfo) return;
+  const info = state.modelInfo;
+  if (!info || !info.text) {
+    footerInfo.hidden = true;
+    footerInfo.textContent = '';
+    footerInfo.removeAttribute('title');
+    return;
+  }
+  footerInfo.hidden = false;
+  footerInfo.textContent = info.text;
+  footerInfo.title = info.title || info.text;
+}
+
+async function loadModelInfo() {
+  try {
+    const r = await fetch(
+      `/api/model-info?provider=${encodeURIComponent(appSettings.provider)}` +
+        `&model=${encodeURIComponent(state.model)}`
+    );
+    if (r.ok) state.modelInfo = await r.json();
+  } catch { /* keep the previous info */ }
+  updateFooterInfo();
 }
 
 function applyModels(models) {
   if (!models.length) throw new Error('the provider returned no models');
+  const autoMode =
+    appSettings.provider === 'auto' || (models.length === 1 && models[0].name === 'auto');
+  if (autoMode) {
+    // Auto: the server picks the source/model per message.
+    state.model = 'auto';
+    modelSelect.innerHTML = '<option value="auto">Auto — server picks a model</option>';
+    modelSelect.disabled = true;
+    updateModelWrapTitle();
+    updateFooterModel();
+    loadModelInfo();
+    return;
+  }
+  modelSelect.disabled = false;
   if (!models.some((m) => m.name === state.model)) state.model = models[0].name;
   modelSelect.innerHTML = models
     .map(
@@ -1402,6 +1480,7 @@ function applyModels(models) {
     .join('');
   updateModelWrapTitle();
   updateFooterModel();
+  loadModelInfo();
 }
 
 async function loadModels() {
@@ -1411,9 +1490,11 @@ async function loadModels() {
     if (!res.ok) throw new Error(data.error || 'model list failed');
     applyModels(data.models || []);
   } catch {
+    modelSelect.disabled = false;
     modelSelect.innerHTML = `<option value="${escapeHtml(state.model)}">${escapeHtml(
       state.model
     )}</option>`;
+    loadModelInfo();
   }
   updateModelWrapTitle();
   updateFooterModel();
@@ -1423,6 +1504,7 @@ modelSelect.addEventListener('change', () => {
   state.model = modelSelect.value;
   updateModelWrapTitle();
   updateFooterModel();
+  loadModelInfo();
 });
 
 /* Tooltip showing the current model (useful when the select is icon-only). */
@@ -1853,7 +1935,10 @@ const SUMMARY_SYS_REDUCE = [
   'Merge duplicate points, plain short lines, never repeat words, no preamble, no closing remarks.',
 ].join('\n');
 
-/* One awaited request inside a background job (resolves with the full text). */
+/* One awaited request inside a background job (resolves with the full text).
+ * Summary + quiz generation both go through here → the same /api/chat as
+ * chat, so Auto routing/failover picks their model too — they are never
+ * pinned to Ollama/phi4 or any other single model. */
 function bgRequest(messages, signal, opts) {
   return new Promise((resolve) => {
     let buf = '';

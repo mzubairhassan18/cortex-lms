@@ -15,6 +15,8 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 // FREE + NO KEY (base URL only) come first, then local, then free-with-key,
 // then mainstream paid APIs, then custom.
 const PROVIDERS = {
+  // ---- Auto: probe every reachable source and route to a working one ----
+  auto:         { label: 'Auto (pick a working model)',       kind: 'auto',      needsKey: false, baseUrl: '' },
   // ---- Free, no API key at all (just the base URL) ----
   kilo:         { label: 'Kilo Code (free · no key)',         kind: 'openai',    needsKey: false, baseUrl: 'https://api.kilo.ai/api/gateway' },
   llm7:         { label: 'LLM7.io (free · no key)',           kind: 'openai',    needsKey: false, baseUrl: 'https://api.llm7.io/v1' },
@@ -70,6 +72,7 @@ function settingsView() {
     providers: Object.entries(PROVIDERS).map(([id, p]) => ({
       id,
       label: p.label,
+      kind: p.kind,
       needsKey: p.needsKey,
       defaultBaseUrl: p.baseUrl,
     })),
@@ -213,6 +216,9 @@ function applySettingsPatch(b) {
   if (typeof b.baseUrl === 'string') s.baseUrl = b.baseUrl.trim().slice(0, 300);
   if (typeof b.apiKey === 'string' && b.apiKey.trim()) s.apiKey = b.apiKey.trim().slice(0, 500);
   if (b.clearKey) s.apiKey = '';
+  // Remember keys per provider so Auto routing can reuse any saved keys.
+  const cur = PROVIDERS[s.provider];
+  if (s.apiKey && cur && cur.needsKey) s.keys = { ...(s.keys || {}), [s.provider]: s.apiKey };
   return s;
 }
 
@@ -235,44 +241,76 @@ app.post('/api/settings/connect', async (req, res) => {
     if (p.needsKey && !s.apiKey) {
       return res.status(400).json({ error: `Enter the ${p.label} API key.` });
     }
-    const models = await listModels(s, p, base);
+    let models;
+    let autoSources;
+    if (p.kind === 'auto') {
+      // Connect = fresh probe of every reachable source.
+      const routes = await buildAutoRoutes();
+      autoProbe = { at: Date.now(), routes };
+      if (!routes.length) {
+        return res
+          .status(502)
+          .json({ error: 'Auto found no responding sources — is Ollama running and the network up?' });
+      }
+      models = [{ name: 'auto' }];
+      autoSources = routes.map((r) => ({
+        id: r.id,
+        label: r.p.label,
+        models: r.models.length,
+        model: pickAutoModel(r),
+      }));
+    } else {
+      models = await listModels(s, p, base);
+    }
     saveSettings(s);
-    res.json({ ...settingsView(), models });
+    res.json({ ...settingsView(), models, ...(autoSources ? { autoSources } : {}) });
   } catch (e) {
     res.status(e.status || 502).json({ error: friendlyNet(e) });
   }
 });
 
 // ---------- Model list (routes to the configured provider) ----------
+// listModelsFull keeps provider metadata (context_length / isFree / …) so
+// Auto routing and the footer's context info can use live numbers.
 
-async function listModels(s, p, base) {
+async function listModelsFull(s, p, base, timeoutMs) {
+  const to = AbortSignal.timeout(timeoutMs || 20000);
+  if (p.kind === 'auto') return [];
   if (p.kind === 'ollama') {
-    const r = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(20000) });
+    const r = await fetch(`${base}/api/tags`, { signal: to });
     if (!r.ok) throw await upstreamFail(r, p);
     const d = await r.json();
-    return (d.models || []).map((m) => ({ name: m.name }));
+    return (d.models || []).map((m) => ({ id: m.name, name: m.name }));
   }
   if (p.kind === 'anthropic') {
     const r = await fetch(`${base}/v1/models`, {
       headers: { 'x-api-key': s.apiKey, 'anthropic-version': '2023-06-01' },
-      signal: AbortSignal.timeout(20000),
+      signal: to,
     });
     if (!r.ok) throw await upstreamFail(r, p);
     const d = await r.json();
-    return (d.data || []).map((m) => ({ name: m.id }));
+    return (d.data || []).map((m) => ({ id: m.id, name: m.id }));
   }
   const r = await fetch(`${base}/models`, {
     headers: s.apiKey ? { Authorization: `Bearer ${s.apiKey}` } : {},
-    signal: AbortSignal.timeout(20000),
+    signal: to,
   });
   if (!r.ok) throw await upstreamFail(r, p);
   const d = await r.json();
-  return (d.data || []).map((m) => ({ name: m.id }));
+  return d.data || [];
+}
+
+async function listModels(s, p, base) {
+  const full = await listModelsFull(s, p, base);
+  return full.map((m) => ({ name: m.id || m.name || String(m) }));
 }
 
 app.get('/api/models', async (req, res) => {
   try {
     const { s, p, base } = providerConf();
+    if (p.kind === 'auto') {
+      return res.json({ models: [{ name: 'auto' }], provider: 'auto' });
+    }
     if (p.needsKey && !s.apiKey) {
       return res
         .status(400)
@@ -281,6 +319,299 @@ app.get('/api/models', async (req, res) => {
     res.json({ models: await listModels(s, p, base), provider: s.provider });
   } catch (e) {
     res.status(e.status || 502).json({ error: friendlyNet(e) });
+  }
+});
+
+// ---------- Auto mode + model context/limits info -------------------------
+//
+// Auto is a pseudo-provider: chat probes (cached) which known sources are
+// reachable and tries them in order until one streams a reply — local
+// Ollama first, then the free no-key gateways, then any provider whose
+// saved key we have.
+
+const AUTO_ORDER = [
+  'ollama', 'kilo', 'llm7', 'ovh',
+  'gemini', 'mistral', 'zai', 'nvidia', 'aionlabs', 'hf', 'ollamac', 'siliconflow', 'modelscope',
+  'openai', 'groq', 'anthropic', 'deepseek', 'openrouter',
+];
+
+// Preferred model per source (first match wins; then a free-looking one;
+// then the first non-embedding/audio entry).
+const AUTO_MODEL_PREF = {
+  ollama:       [/^phi4-mini-fast/i, /^phi4-mini/i],
+  kilo:         [/^kilo-auto\/free$/i, /^kilo-auto\//i],
+  llm7:         [/^mistral-Nemo-Instruct-2407$/i, /^Mistral/i],
+  ovh:          [/^Mistral-Small-3\.2/i, /^Meta-Llama-3_3-70B/i, /^gpt-oss-120b$/i],
+  gemini:       [/^gemini-2\.0-flash/i, /flash/i],
+  mistral:      [/^mistral-small/i, /mistral/i],
+  zai:          [/^glm-4\.?flash/i, /glm/i],
+  nvidia:       [/llama/i],
+  hf:           [/llama/i],
+  ollamac:      [/llama/i],
+  siliconflow:  [/qwen/i],
+  modelscope:   [/qwen/i],
+  openai:       [/^gpt-4o-mini/i, /^gpt-4o/i],
+  groq:         [/^llama-3\.3-70b/i, /^llama-3\.1-8b/i],
+  anthropic:    [/^claude-3-5-haiku/i, /claude/i],
+  deepseek:     [/^deepseek-chat/i, /deepseek/i],
+  openrouter:   [/free/i, /llama/i],
+};
+
+const AUTO_FIRST_BYTE_MS = Number(process.env.AUTO_FIRST_BYTE_MS) || 35000;
+
+// Usage-limit notes for the sidebar footer (informational; live context
+// windows from provider /models and Ollama /api/show win over the table).
+const PROVIDER_LIMITS = {
+  kilo: 'free · no key · fair-use limits',
+  llm7: 'free · no key · rate-limited',
+  ovh: 'free · anonymous · fair-use limits',
+  ollama: 'local · no rate limits',
+  gemini: 'free tier · rate-limited',
+  mistral: 'free mode · rate-limited',
+  zai: 'free models · rate-limited',
+  nvidia: 'free tier · rate-limited',
+  aionlabs: 'free · rate-limited',
+  hf: 'free router tier · rate-limited',
+  ollamac: 'free tier · rate-limited',
+  siliconflow: 'free models · rate-limited',
+  modelscope: 'free inference · rate-limited',
+  openai: 'paid · usage billed',
+  groq: 'free tier · rate-limited',
+  anthropic: 'paid · usage billed',
+  deepseek: 'paid · usage billed',
+  openrouter: 'paid · credits',
+  custom: '',
+};
+
+// Static fallback context windows (used only when the provider publishes none).
+const MODEL_CTX = [
+  [/phi4|phi-?4/i, '128K'],
+  [/claude/i, '200K'],
+  [/gemini/i, '1M'],
+  [/^gpt-4\.1/i, '1M'],
+  [/(gpt-4o|o[0-9]-mini)/i, '128K'],
+  [/deepseek/i, '128K'],
+  [/llama-3/i, '128K'],
+  [/mistral-nemo/i, '128K'],
+  [/mistral/i, '32K'],
+  [/qwen/i, '32K–256K'],
+];
+
+function ctxFmt(n) {
+  if (!n) return '';
+  // 131072/65536 are binary "128K/64K"; 256000/1000000 are decimal.
+  const k = n % 1000 === 0 ? n / 1000 : n % 1024 === 0 ? n / 1024 : Math.round(n / 1000);
+  if (k >= 1000) return `${Math.round(k / 100) / 10}M`;
+  return `${k}K`;
+}
+
+// Context window from provider /models metadata (Kilo/OVH: context_length,
+// LLM7: context_window.tokens, gateways: top_provider.context_length).
+function ctxFromMeta(m) {
+  if (!m || typeof m !== 'object') return 0;
+  const n =
+    +m.context_length ||
+    +(m.top_provider && m.top_provider.context_length) ||
+    +(m.context_window && m.context_window.tokens) ||
+    0;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+// Ollama /api/show -> model_info key like "phi3.context_length".
+const ollamaCtxCache = new Map(); // model -> {n, at}
+async function ollamaContext(model, base) {
+  if (!model) return 0;
+  const hit = ollamaCtxCache.get(model);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.n;
+  let n = 0;
+  try {
+    const r = await fetch(`${base || OLLAMA_URL}/api/show`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      const info = d.model_info || {};
+      const key = Object.keys(info).find((k) => k.endsWith('.context_length'));
+      if (key) n = +info[key] || 0;
+    }
+  } catch { /* offline — fall back to the static table */ }
+  ollamaCtxCache.set(model, { n, at: Date.now() });
+  return n;
+}
+
+// Free gateways publish full model metadata (context windows included).
+const LIVE_CTX_PROVIDERS = new Set(['kilo', 'llm7', 'ovh']);
+const providerModelsCache = new Map(); // id -> {at, models}
+async function liveProviderModels(id) {
+  const hit = providerModelsCache.get(id);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.models;
+  const s = loadSettings();
+  const p = PROVIDERS[id];
+  const apiKey = (s.keys && s.keys[id]) || (s.provider === id ? s.apiKey : '');
+  let models = [];
+  try {
+    models = await listModelsFull({ ...s, apiKey }, p, p.baseUrl, 8000);
+  } catch { /* offline — static table */ }
+  providerModelsCache.set(id, { at: Date.now(), models });
+  return models;
+}
+
+// Footer info for one provider+model: live context where available,
+// static table otherwise, plus the provider's limits note.
+async function modelInfoFor(providerId, model, opts = {}) {
+  const p = PROVIDERS[providerId] || PROVIDERS.ollama;
+  const base = opts.base || p.baseUrl || OLLAMA_URL;
+  const limits = PROVIDER_LIMITS[providerId] || '';
+  let context = '';
+  let live = false;
+
+  if (opts.models && model) {
+    const n = ctxFromMeta(opts.models.find((m) => (m.id || m.name) === model));
+    if (n) { context = ctxFmt(n); live = true; }
+  }
+  if (!context && providerId === 'ollama' && model) {
+    const n = await ollamaContext(model, base);
+    if (n) { context = ctxFmt(n); live = true; }
+  }
+  if (!context && LIVE_CTX_PROVIDERS.has(providerId) && model) {
+    const models = await liveProviderModels(providerId);
+    const n = ctxFromMeta(models.find((m) => m.id === model));
+    if (n) { context = ctxFmt(n); live = true; }
+  }
+  if (!context) {
+    for (const [re, val] of MODEL_CTX) {
+      if (re.test(model || '')) { context = val; break; }
+    }
+  }
+  if (!context) context = 'varies';
+
+  const text = `Context ${context}${limits ? ` · ${limits}` : ''}`;
+  const title =
+    `Model: ${model || '—'}\nContext window: ${context}${live ? ' (live from provider)' : ''}` +
+    (limits ? `\nLimits: ${limits}` : '');
+  return { context, limits, text, title };
+}
+
+// ---- probing & routing ----
+
+let autoProbe = null; // {at, routes}
+let autoWinner = null; // {id, model, at} — last source that streamed a reply
+
+async function buildAutoRoutes() {
+  const s = loadSettings();
+  const routes = await Promise.all(
+    AUTO_ORDER.map(async (id) => {
+      const p = PROVIDERS[id];
+      if (!p || p.kind === 'auto' || !p.baseUrl) return null;
+      const apiKey = (s.keys && s.keys[id]) || (s.provider === id ? s.apiKey : '');
+      if (p.needsKey && !apiKey) return null; // only sources we could actually call
+      try {
+        const models = await listModelsFull({ ...s, apiKey }, p, p.baseUrl, 8000);
+        if (!models.length) return null;
+        const route = {
+          id,
+          p,
+          base: p.baseUrl,
+          apiKey,
+          models,
+          // Local cold-loads can be slow; cloud sources get a shorter budget.
+          firstByteMs: id === 'ollama' ? FIRST_BYTE_MS : AUTO_FIRST_BYTE_MS,
+        };
+        route.model = pickAutoModel(route);
+        return route;
+      } catch {
+        return null; // unreachable / refused — skip this source
+      }
+    })
+  );
+  return routes.filter(Boolean);
+}
+
+function orderRoutes(routes) {
+  if (!autoWinner || Date.now() - autoWinner.at > 30 * 60 * 1000) return routes;
+  const i = routes.findIndex((r) => r.id === autoWinner.id);
+  if (i > 0) {
+    const [w] = routes.splice(i, 1);
+    routes.unshift(w);
+  }
+  return routes;
+}
+
+function pickAutoModel(route) {
+  for (const re of AUTO_MODEL_PREF[route.id] || []) {
+    const m = route.models.find((x) => re.test(x.id || x.name || ''));
+    if (m) return m.id || m.name;
+  }
+  const free = route.models.find((m) => m.isFree === true || /(^|\/|:)free$/i.test(m.id || ''));
+  if (free) return free.id || free.name;
+  const chat = route.models.find(
+    (m) => !/embed|whisper|-tts-|sdxl|stable-diffusion|guard|rerank/i.test(m.id || m.name || '')
+  );
+  const pick = chat || route.models[0];
+  return pick.id || pick.name;
+}
+
+async function autoRoutes() {
+  if (autoProbe && Date.now() - autoProbe.at < 5 * 60 * 1000) {
+    return orderRoutes(autoProbe.routes.slice());
+  }
+  const routes = await buildAutoRoutes();
+  autoProbe = { at: Date.now(), routes };
+  return orderRoutes(routes.slice());
+}
+
+// Combined context/limits across everything Auto can reach.
+async function autoInfo() {
+  let routes = [];
+  try { routes = await autoRoutes(); } catch { /* offline */ }
+  const per = [];
+  const ctxs = [];
+  for (const r of routes) {
+    const model = pickAutoModel(r);
+    let n = 0;
+    const m = r.models.find((x) => (x.id || x.name) === model);
+    if (m) n = ctxFromMeta(m);
+    if (!n && r.id === 'ollama') n = await ollamaContext(model, r.base).catch(() => 0);
+    if (n) ctxs.push(n);
+    per.push({
+      label: r.p.label,
+      model,
+      context: n ? ctxFmt(n) : 'varies',
+      limits: PROVIDER_LIMITS[r.id] || '',
+    });
+  }
+  const range = ctxs.length ? `${ctxFmt(Math.min(...ctxs))}–${ctxFmt(Math.max(...ctxs))}` : 'varies';
+  const hasLocal = routes.some((r) => r.id === 'ollama');
+  const limits = hasLocal
+    ? 'local: no limits · free tiers: rate-limited'
+    : 'free tiers: rate-limited';
+  const text = routes.length
+    ? `Auto: ${routes.length} source${routes.length === 1 ? '' : 's'} · ctx ${range} · ${limits}`
+    : 'Auto: press Connect in ⚙ Settings to probe sources';
+  const title = routes.length
+    ? 'Auto tries these sources in order:\n' +
+      per
+        .map((x) => `• ${x.label} — ${x.model} · ctx ${x.context}${x.limits ? ` · ${x.limits}` : ''}`)
+        .join('\n')
+    : 'No sources probed yet.';
+  return { context: range, limits, text, title, sources: per };
+}
+
+// Sidebar footer asks for the current context window + limits.
+app.get('/api/model-info', async (req, res) => {
+  try {
+    const provider = String(req.query.provider || '').trim() || loadSettings().provider;
+    const model = String(req.query.model || '').trim();
+    if (!PROVIDERS[provider]) return res.status(400).json({ error: 'Unknown provider' });
+    if (provider === 'auto') return res.json(await autoInfo());
+    const conf = providerConf();
+    const base = conf.s.provider === provider ? conf.base : PROVIDERS[provider].baseUrl;
+    res.json(await modelInfoFor(provider, model, { base }));
+  } catch (e) {
+    res.status(500).json({ error: friendlyNet(e) });
   }
 });
 
@@ -328,11 +659,14 @@ app.post('/api/chat', async (req, res) => {
   let anyContent = false;
   let timedOut = false;
 
-  async function runOnce() {
+  async function runOnce(route) {
     const ctl = new AbortController();
     let timer = null;
+    const p = route.p;
+    const base = route.base;
+    const s = { apiKey: route.apiKey };
 
-    // Arm a resettable timeout: FIRST_BYTE_MS initially, then IDLE_MS per chunk.
+    // Arm a resettable timeout: first-byte budget initially, then IDLE_MS per chunk.
     const arm = (ms) => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
@@ -340,14 +674,13 @@ app.post('/api/chat', async (req, res) => {
         ctl.abort();
       }, ms);
     };
-    arm(FIRST_BYTE_MS);
+    arm(route.firstByteMs || FIRST_BYTE_MS);
 
     const onClose = () => ctl.abort();
     res.on('close', onClose);
 
     try {
-      const { s, p, base } = providerConf();
-      if (p.needsKey && !s.apiKey) {
+      if (p.needsKey && !route.apiKey) {
         const e = new Error(`No API key saved for ${p.label} — open ⚙ Settings and Connect.`);
         e.fatal = true;
         throw e;
@@ -364,7 +697,7 @@ app.post('/api/chat', async (req, res) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model,
+            model: route.model,
             messages,
             stream: true,
             // Grammar-locked JSON output — small models otherwise emit
@@ -390,7 +723,7 @@ app.post('/api/chat', async (req, res) => {
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({
-            model,
+            model: route.model,
             max_tokens: maxTokens > 0 ? Math.min(maxTokens, 4096) : 4096,
             ...(temperature !== null ? { temperature } : {}),
             ...(system ? { system } : {}),
@@ -409,7 +742,7 @@ app.post('/api/chat', async (req, res) => {
             ...(s.apiKey ? { Authorization: `Bearer ${s.apiKey}` } : {}),
           },
           body: JSON.stringify({
-            model,
+            model: route.model,
             messages,
             stream: true,
             ...(temperature !== null ? { temperature } : {}),
@@ -421,6 +754,16 @@ app.post('/api/chat', async (req, res) => {
       }
 
       if (!upstream.ok || !upstream.body) throw await upstreamFail(upstream, p);
+
+      // Tell the client which source/model actually serves this reply so the
+      // sidebar footer can show its context window + limits.
+      try {
+        const info = await modelInfoFor(route.id, route.model, {
+          base,
+          models: route.models,
+        });
+        send({ route: { provider: route.id, label: p.label, model: route.model, info } });
+      } catch { /* info is best-effort */ }
 
       // ---- read the stream (JSONL for Ollama, SSE for the rest) ----
       const reader = upstream.body.getReader();
@@ -480,29 +823,79 @@ app.post('/api/chat', async (req, res) => {
   }
 
   let lastError = null;
-  const MAX_ATTEMPTS = 2;
+  const activeId = loadSettings().provider;
+  const isAuto = (PROVIDERS[activeId] || {}).kind === 'auto';
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    if (clientGone) break;
+  const singleRoute = () => {
+    const { s, p, base } = providerConf();
+    return {
+      id: s.provider,
+      label: p.label,
+      p,
+      base,
+      apiKey: s.apiKey,
+      model,
+      firstByteMs: FIRST_BYTE_MS,
+    };
+  };
+
+  if (isAuto) {
+    // Try each responding source in order until one streams a reply.
+    let routes = [];
     try {
-      await runOnce();
-      lastError = null;
-      break;
-    } catch (err) {
+      routes = await autoRoutes();
+    } catch (e) {
+      lastError = e;
+    }
+    if (!routes.length && !lastError) lastError = new Error('Auto found no responding sources.');
+    const failures = [];
+    for (const route of routes) {
+      if (clientGone || anyContent) break;
+      timedOut = false;
+      try {
+        await runOnce(route);
+        autoWinner = { id: route.id, model: route.model, at: Date.now() };
+        lastError = null;
+        break;
+      } catch (err) {
+        if (clientGone) break;
+        if (anyContent) {
+          lastError = err; // stream started then died — surface as-is
+          break;
+        }
+        failures.push(`${route.p.label}: ${timedOut ? 'timed out' : err.message || 'failed'}`);
+        lastError = err;
+      }
+    }
+    if (failures.length && lastError) {
+      lastError = new Error(
+        'Auto: no working model found.\nTried:\n- ' + failures.slice(0, 6).join('\n- ')
+      );
+    }
+  } else {
+    const MAX_ATTEMPTS = 2;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       if (clientGone) break;
-      if (timedOut) {
-        lastError = new Error(
-          `Timed out waiting for ${providerConf().p.label} — the model may still be loading or busy. Try again in a moment.`
-        );
+      try {
+        await runOnce(singleRoute());
+        lastError = null;
+        break;
+      } catch (err) {
+        if (clientGone) break;
+        if (timedOut) {
+          lastError = new Error(
+            `Timed out waiting for ${providerConf().p.label} — the model may still be loading or busy. Try again in a moment.`
+          );
+          break;
+        }
+        lastError = err;
+        const retryable = err.name !== 'AbortError' && !anyContent && !err.fatal;
+        if (attempt < MAX_ATTEMPTS && retryable) {
+          await sleep(800);
+          continue;
+        }
         break;
       }
-      lastError = err;
-      const retryable = err.name !== 'AbortError' && !anyContent && !err.fatal;
-      if (attempt < MAX_ATTEMPTS && retryable) {
-        await sleep(800);
-        continue;
-      }
-      break;
     }
   }
 
@@ -510,7 +903,10 @@ app.post('/api/chat', async (req, res) => {
     const msg = lastError.message || 'Unknown error';
     const { p } = providerConf();
     let hint = '';
-    if (lastError.httpStatus) {
+    if (isAuto) {
+      hint =
+        '\nOpen ⚙ Settings → Auto → Connect to re-probe sources, or start Ollama for local fallback.';
+    } else if (lastError.httpStatus) {
       hint = `\nCheck ⚙ Settings — provider, API key and Base URL must match ${p.label}.`;
     } else if (p.kind === 'ollama') {
       hint = '\nIs Ollama running and healthy? Restart it with: ollama serve';

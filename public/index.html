@@ -33,6 +33,7 @@
       <!-- Static footer: active provider/model + settings entry -->
       <div id="sidebar-footer">
         <div id="footer-model" title="Active provider and model">🤖 …</div>
+        <div id="footer-info" hidden title="Context window and usage limits"></div>
         <button id="settings-btn" title="Provider & API settings">⚙ Settings</button>
       </div>
     </aside>
@@ -89,8 +90,10 @@
               <input id="set-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
             </div>
 
-            <label class="set-label" for="set-base">Base URL <span class="set-inline-hint">(optional — OpenAI-compatible endpoints)</span></label>
-            <input id="set-base" type="text" placeholder="https://api.openai.com/v1" spellcheck="false">
+            <div id="set-base-row">
+              <label class="set-label" for="set-base">Base URL <span class="set-inline-hint">(optional — OpenAI-compatible endpoints)</span></label>
+              <input id="set-base" type="text" placeholder="https://api.openai.com/v1" spellcheck="false">
+            </div>
 
             <div class="set-actions">
               <button id="set-connect">Connect</button>
