@@ -949,6 +949,52 @@ body.library-open #explain-tabs { display: none; }
   background: var(--accent2);
 }
 
+/* Delete confirmation shown next to a container's ✕ (closing = permanent) */
+#confirm-popup {
+  position: fixed;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 210px;
+  max-width: 260px;
+  padding: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  z-index: 1100;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+#confirm-popup .confirm-msg {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+}
+#confirm-popup .confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+#confirm-popup button {
+  border: none;
+  border-radius: 7px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+#confirm-popup .confirm-cancel {
+  background: var(--bg-alt);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+#confirm-popup .confirm-cancel:hover { border-color: var(--accent); }
+#confirm-popup .confirm-ok {
+  background: var(--danger);
+  color: var(--bg-panel);
+}
+#confirm-popup .confirm-ok:hover { opacity: 0.85; }
+
 /* ---------------- Highlighted source text ---------------- */
 /* Text that was explained gets highlighted; clicking it instantly focuses
    (and widens) the matching explainer container. */

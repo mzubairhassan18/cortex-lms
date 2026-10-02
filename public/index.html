@@ -135,6 +135,15 @@
     <button type="button" data-act="note" title="Save to my notes in the summary">📌 Note</button>
   </div>
 
+  <!-- Shown next to a container's ✕: closing deletes it permanently. -->
+  <div id="confirm-popup">
+    <div class="confirm-msg"></div>
+    <div class="confirm-actions">
+      <button type="button" class="confirm-cancel">Cancel</button>
+      <button type="button" class="confirm-ok">Delete</button>
+    </div>
+  </div>
+
   <script src="vendor/marked.min.js"></script>
 <script src="app.js"></script>
 </body>

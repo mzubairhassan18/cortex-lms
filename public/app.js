@@ -1068,6 +1068,7 @@ function hideExplainPanel() {
   // state (Summary/Library would otherwise stay "on" with no panel).
   setSummaryOverlay(false);
   closeLibrary(false);
+  hideConfirm(); // never leave the delete prompt floating over a closed panel
   updateExplainToggle();
 }
 
@@ -1207,6 +1208,64 @@ function closeExplainWindow(id) {
   refreshAllHighlights(); // closed windows lose their highlight
   persist();
 }
+
+/* ---------- delete confirmation ----------
+ * Closing a container deletes it (and its nested ones) permanently, so each
+ * ✕ first asks via a small styled prompt anchored right next to that button. */
+const confirmPopup = $('confirm-popup');
+const confirmMsg = confirmPopup.querySelector('.confirm-msg');
+let confirmTargetId = null;
+
+function hideConfirm() {
+  confirmPopup.style.display = 'none';
+  confirmTargetId = null;
+}
+
+function confirmCloseExplain(anchor, id) {
+  const node = state.explains.nodes[id];
+  if (!node) return;
+  if (confirmTargetId === id) { hideConfirm(); return; } // same ✕ toggles it off
+
+  const kids = subtreeIds(id).length - 1;
+  confirmTargetId = id;
+  confirmMsg.textContent =
+    kids > 0
+      ? `Delete "${truncateLabel(node.selection, 30)}" and its ${kids} nested container${kids > 1 ? 's' : ''}? This cannot be undone.`
+      : `Delete "${truncateLabel(node.selection, 30)}"? This explanation will be deleted permanently.`;
+  confirmPopup.style.display = 'flex';
+
+  // Pin the prompt next to the ✕, keeping it inside the viewport.
+  const r = anchor.getBoundingClientRect();
+  const w = confirmPopup.offsetWidth;
+  const h = confirmPopup.offsetHeight;
+  let left = r.right - w;
+  if (left < 8) left = Math.min(r.left, window.innerWidth - w - 8);
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = r.top - h - 6;
+  confirmPopup.style.left = `${Math.max(8, left)}px`;
+  confirmPopup.style.top = `${Math.max(8, top)}px`;
+}
+
+confirmPopup.addEventListener('click', (e) => {
+  if (e.target.closest('.confirm-cancel')) { hideConfirm(); return; }
+  if (e.target.closest('.confirm-ok')) {
+    const id = confirmTargetId;
+    hideConfirm();
+    if (id) closeExplainWindow(id);
+  }
+});
+
+/* Outside click or Escape dismisses without deleting (the ✕ itself is
+ * excluded so clicking it again toggles the prompt instead). */
+document.addEventListener('mousedown', (e) => {
+  if (confirmPopup.style.display === 'none') return;
+  if (confirmPopup.contains(e.target)) return;
+  if (e.target.closest('.ex-close, .tab-close')) return;
+  hideConfirm();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && confirmPopup.style.display !== 'none') hideConfirm();
+});
 
 /* Full reset — used when switching/creating conversations (fresh panel). */
 function clearExplainWindows() {
@@ -2121,7 +2180,7 @@ explainPanels.addEventListener('click', (e) => {
   const tabClose = e.target.closest('.ex-tab .tab-close');
   if (tabClose) {
     e.stopPropagation();
-    closeExplainWindow(tabClose.dataset.close);
+    confirmCloseExplain(tabClose, tabClose.dataset.close);
     return;
   }
   const tab = e.target.closest('.ex-tab');
@@ -2132,7 +2191,7 @@ explainPanels.addEventListener('click', (e) => {
   const close = e.target.closest('.ex-close');
   if (close) {
     e.stopPropagation();
-    closeExplainWindow(close.closest('.ex-container').dataset.id);
+    confirmCloseExplain(close, close.closest('.ex-container').dataset.id);
     return;
   }
   const pane = e.target.closest('.ex-pane.collapsed');
@@ -2292,7 +2351,7 @@ explainTabs.addEventListener('click', (e) => {
   const close = e.target.closest('[data-close]');
   if (close) {
     e.stopPropagation();
-    closeExplainWindow(close.dataset.close);
+    confirmCloseExplain(close, close.dataset.close);
     return;
   }
   const tab = e.target.closest('.explain-tab');
