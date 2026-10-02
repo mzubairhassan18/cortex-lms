@@ -5,8 +5,26 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const OLLAMA_URL = (process.env.OLLAMA_URL || 'http://localhost:11434').replace(/\/$/, '');
+/*
+ * OLLAMA_ENABLED — set to 0/false/off/no when this deployment has no local
+ * Ollama (i.e. it is running on a remote host). Then:
+ *   • Auto never probes localhost:11434 (nothing is listening there, so every
+ *     probe would just burn a connection timeout),
+ *   • "Local (Ollama)" disappears from the provider list, and
+ *   • the default provider becomes Auto instead of the local endpoint, so a
+ *     fresh install never points at a dead URL.
+ * Unset — or any value other than 0/false/off/no/empty — keeps today's
+ * behaviour: local Ollama is used first when present. OLLAMA_URL still applies
+ * if you want to probe a *remote* Ollama; leave OLLAMA_ENABLED unset for that.
+ */
+const OLLAMA_ENABLED = !['0', 'false', 'off', 'no', ''].includes(
+  String(process.env.OLLAMA_ENABLED == null ? '1' : process.env.OLLAMA_ENABLED).trim().toLowerCase()
+);
 const DATA_DIR = path.join(__dirname, 'data');
 const CONV_FILE = path.join(DATA_DIR, 'conversations.json');
+const CONV_BAK = `${CONV_FILE}.bak`;
+// Append-only record of removed conversations (see the DELETE route).
+const CONV_DELETED = path.join(DATA_DIR, 'conversations.deleted.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads'); // per-conversation attachments
 const TEXT_CAP = 200000; // chars of extracted text kept per file (system prompt)
@@ -43,7 +61,11 @@ const PROVIDERS = {
   openrouter:   { label: 'OpenRouter',                 kind: 'openai',    needsKey: true,  baseUrl: 'https://openrouter.ai/api/v1' },
   custom:       { label: 'Custom (OpenAI-compatible)', kind: 'openai',    needsKey: true,  baseUrl: '' },
 };
-const DEFAULT_SETTINGS = { provider: 'ollama', apiKey: '', baseUrl: '' };
+const DEFAULT_SETTINGS = { provider: OLLAMA_ENABLED ? 'ollama' : 'auto', apiKey: '', baseUrl: '' };
+// No Ollama on this host -> never offer it (and never probe it below).
+if (!OLLAMA_ENABLED) delete PROVIDERS.ollama;
+// Which provider an unusable/missing saved setting falls back to.
+const FALLBACK_PROVIDER = OLLAMA_ENABLED ? 'ollama' : 'auto';
 
 function loadSettings() {
   try {
@@ -60,7 +82,7 @@ function saveSettings(s) {
 
 function providerConf() {
   const s = loadSettings();
-  const p = PROVIDERS[s.provider] || PROVIDERS.ollama;
+  const p = PROVIDERS[s.provider] || PROVIDERS[FALLBACK_PROVIDER];
   const base = (String(s.baseUrl || '').trim() || p.baseUrl).replace(/\/$/, '');
   return { s, p, base };
 }
@@ -68,7 +90,7 @@ function providerConf() {
 function settingsView() {
   const s = loadSettings();
   return {
-    provider: PROVIDERS[s.provider] ? s.provider : 'ollama',
+    provider: PROVIDERS[s.provider] ? s.provider : FALLBACK_PROVIDER,
     baseUrl: s.baseUrl || '',
     apiKeySet: !!s.apiKey,
     providers: Object.entries(PROVIDERS).map(([id, p]) => ({
@@ -136,6 +158,12 @@ function loadConversations() {
 }
 
 function saveConversations(list) {
+  /* Snapshot the outgoing state first. conversations.json is the ONLY copy of
+   * every conversation, so a bad write would otherwise be unrecoverable.
+   * Best-effort: a failed backup must never block a save. */
+  try {
+    if (fs.existsSync(CONV_FILE)) fs.copyFileSync(CONV_FILE, CONV_BAK);
+  } catch { /* backup is best-effort */ }
   fs.writeFileSync(CONV_FILE, JSON.stringify(list, null, 2));
 }
 
@@ -196,12 +224,57 @@ app.put('/api/conversations/:id', (req, res) => {
 });
 
 app.delete('/api/conversations/:id', (req, res) => {
-  saveConversations(loadConversations().filter((c) => c.id !== req.params.id));
+  const list = loadConversations();
+  const gone = list.find((c) => c.id === req.params.id);
+  saveConversations(list.filter((c) => c.id !== req.params.id));
+
+  /* Remove = permanent by design, but never silent. Archive the whole
+   * conversation (append-only) and log it, so a removal is both visible in the
+   * server log and restorable later via POST /api/deleted/:id/restore.
+   * Without this a delete left no trace anywhere — the file was simply
+   * rewritten smaller. */
+  if (gone) {
+    try {
+      const prior = JSON.parse(fs.readFileSync(CONV_DELETED, 'utf8'));
+      fs.writeFileSync(
+        CONV_DELETED,
+        JSON.stringify([...prior, { ...gone, deletedAt: Date.now() }], null, 2)
+      );
+    } catch {
+      fs.writeFileSync(CONV_DELETED, JSON.stringify([{ ...gone, deletedAt: Date.now() }], null, 2));
+    }
+    console.log(
+      `🗑  Deleted conversation ${gone.id} "${gone.title}" ` +
+        `(${list.length} -> ${list.length - 1}) — archived in ${path.basename(CONV_DELETED)}`
+    );
+  }
+
   // Drop the conversation's uploaded files as well.
   try {
     fs.rmSync(path.join(UPLOAD_DIR, req.params.id), { recursive: true, force: true });
   } catch { /* nothing stored */ }
   res.json({ ok: true });
+});
+
+/* Put an archived conversation back. */
+app.post('/api/deleted/:id/restore', (req, res) => {
+  let archived;
+  try {
+    archived = JSON.parse(fs.readFileSync(CONV_DELETED, 'utf8'));
+  } catch {
+    return res.status(404).json({ error: 'No archived conversations.' });
+  }
+  const i = archived.findIndex((c) => c.id === req.params.id);
+  if (i === -1) return res.status(404).json({ error: 'Not archived.' });
+  const conv = archived[i];
+  const list = loadConversations();
+  if (!list.some((c) => c.id === conv.id)) list.push(conv);
+  saveConversations(list);
+  archived.splice(i, 1);
+  fs.writeFileSync(CONV_DELETED, JSON.stringify(archived, null, 2));
+  const { deletedAt, ...restored } = conv; // eslint-disable-line no-unused-vars
+  console.log(`♻️  Restored conversation ${restored.id} "${restored.title}"`);
+  res.json({ ok: true, conv: restored });
 });
 
 /* ================= File uploads: extraction + storage ================= */
@@ -383,7 +456,7 @@ app.put('/api/settings', (req, res) => {
 app.post('/api/settings/connect', async (req, res) => {
   try {
     const s = applySettingsPatch(req.body || {});
-    const p = PROVIDERS[s.provider] || PROVIDERS.ollama;
+    const p = PROVIDERS[s.provider] || PROVIDERS[FALLBACK_PROVIDER];
     const base = (String(s.baseUrl || '').trim() || p.baseUrl).replace(/\/$/, '');
     if (p.needsKey && !s.apiKey) {
       return res.status(400).json({ error: `Enter the ${p.label} API key.` });
@@ -395,9 +468,11 @@ app.post('/api/settings/connect', async (req, res) => {
       const routes = await buildAutoRoutes();
       autoProbe = { at: Date.now(), routes };
       if (!routes.length) {
-        return res
-          .status(502)
-          .json({ error: 'Auto found no responding sources — is Ollama running and the network up?' });
+        return res.status(502).json({
+          error: OLLAMA_ENABLED
+            ? 'Auto found no responding sources — is Ollama running and the network up?'
+            : 'Auto found no responding sources — check the network, or add an API key in ⚙ Settings.',
+        });
       }
       models = [{ name: 'auto' }];
       autoSources = routes.map((r) => ({
@@ -477,7 +552,10 @@ app.get('/api/models', async (req, res) => {
 // saved key we have.
 
 const AUTO_ORDER = [
-  'ollama', 'kilo', 'llm7', 'ovh',
+  // No Ollama on this host -> skip it entirely: buildAutoRoutes would only
+  // burn a connection timeout probing localhost:11434 on every Auto call.
+  ...(OLLAMA_ENABLED ? ['ollama'] : []),
+  'kilo', 'llm7', 'ovh',
   'gemini', 'mistral', 'zai', 'nvidia', 'aionlabs', 'hf', 'ollamac', 'siliconflow', 'modelscope',
   'openai', 'groq', 'anthropic', 'deepseek', 'openrouter',
 ];
@@ -567,6 +645,7 @@ function ctxFromMeta(m) {
 // Ollama /api/show -> model_info key like "phi3.context_length".
 const ollamaCtxCache = new Map(); // model -> {n, at}
 async function ollamaContext(model, base) {
+  if (!OLLAMA_ENABLED) return 0; // no local Ollama on this host
   if (!model) return 0;
   const hit = ollamaCtxCache.get(model);
   if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.n;
@@ -609,7 +688,7 @@ async function liveProviderModels(id) {
 // Footer info for one provider+model: live context where available,
 // static table otherwise, plus the provider's limits note.
 async function modelInfoFor(providerId, model, opts = {}) {
-  const p = PROVIDERS[providerId] || PROVIDERS.ollama;
+  const p = PROVIDERS[providerId] || PROVIDERS[FALLBACK_PROVIDER];
   const base = opts.base || p.baseUrl || OLLAMA_URL;
   const limits = PROVIDER_LIMITS[providerId] || '';
   let context = '';
@@ -1051,8 +1130,9 @@ app.post('/api/chat', async (req, res) => {
     const { p } = providerConf();
     let hint = '';
     if (isAuto) {
-      hint =
-        '\nOpen ⚙ Settings → Auto → Connect to re-probe sources, or start Ollama for local fallback.';
+      hint = OLLAMA_ENABLED
+        ? '\nOpen ⚙ Settings → Auto → Connect to re-probe sources, or start Ollama for local fallback.'
+        : '\nOpen ⚙ Settings → Auto → Connect to re-probe sources.';
     } else if (lastError.httpStatus) {
       hint = `\nCheck ⚙ Settings — provider, API key and Base URL must match ${p.label}.`;
     } else if (p.kind === 'ollama') {
@@ -1068,4 +1148,5 @@ app.listen(PORT, () => {
   const { s, p, base } = providerConf();
   console.log(`🎓 Learning Bot running at http://localhost:${PORT}`);
   console.log(`   Provider: ${p.label} (${s.provider}) — ${base}`);
+  if (!OLLAMA_ENABLED) console.log('   OLLAMA_ENABLED=0 — local Ollama is not probed or offered.');
 });
