@@ -72,19 +72,61 @@ function escapeHtml(s) {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+    // ">" is deliberately NOT escaped: a lone > cannot open an HTML tag,
+    // and escaping it would break markdown blockquotes ("> quote").
     .replace(/"/g, '&quot;');
 }
 
+/* Inline markdown — runs on ALREADY-ESCAPED text (safe by construction:
+ * only whitelisted tags are produced, links limited to http/https/mailto). */
 function renderInline(s) {
   return s
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+    .replace(
+      /\[([^\]]+)\]\((https?:\/\/[^)\s]+|mailto:[^)\s]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+    );
 }
 
-function renderMarkdown(src) {
-  const text = escapeHtml(src);
+/* Auto-detect markdown syntax in the raw text. Plain chat (including things
+ * like "2 * 3") keeps the simple paragraph rendering below. */
+function looksLikeMarkdown(s) {
+  return (
+    /(^|\n)[ \t]*(#{1,6}[ \t]|[-*+][ \t]|\d+\.[ \t]|>[ \t]?|```)/.test(s) ||
+    /(^|\n)[ \t]*([-*_][ \t]*){3,}\n/.test(s) ||
+    /(^|\n)[ \t]*\|.+\|/.test(s) ||
+    /\*\*[^*\n]+\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\n]+\)|~~[^~\n]+~~/.test(s)
+  );
+}
+
+/* The source is escaped BEFORE parsing, so raw HTML in the model output can
+ * never reach the DOM. This finishes the job for URLs a markdown link could
+ * smuggle in (javascript:, data:, …) and adds safe link attributes. */
+function sanitizeRendered(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  tpl.content.querySelectorAll('a[href]').forEach((a) => {
+    const href = a.getAttribute('href') || '';
+    if (/^(https?:\/\/|mailto:)/i.test(href)) {
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+    } else {
+      a.removeAttribute('href');
+    }
+  });
+  tpl.content.querySelectorAll('img').forEach((img) => {
+    const src = img.getAttribute('src') || '';
+    if (!/^https?:\/\//i.test(src)) img.remove();
+  });
+  return tpl.innerHTML;
+}
+
+/* Fallback block renderer (pre-marked): correct for simple content, used
+ * only if the library fails to load. Receives already-escaped text. */
+function legacyMarkdown(text) {
   const blocks = text.split(/\n{2,}/);
   return blocks
     .map((block) => {
@@ -110,6 +152,20 @@ function renderMarkdown(src) {
       return `<p>${t.replace(/\n/g, '<br>')}</p>`;
     })
     .join('');
+}
+
+function renderMarkdown(src) {
+  const raw = String(src == null ? '' : src);
+  const text = escapeHtml(raw);
+  if (!looksLikeMarkdown(raw)) return `<p>${text.replace(/\n/g, '<br>')}</p>`;
+  if (window.marked) {
+    try {
+      return sanitizeRendered(marked.parse(text, { breaks: true }));
+    } catch {
+      /* fall through to the built-in renderer */
+    }
+  }
+  return legacyMarkdown(text);
 }
 
 function messageHtml(m) {
@@ -290,6 +346,15 @@ function scrollDown(el) {
 
 /* ================= Main chat ================= */
 
+/* Sent with every chat request (not stored in the conversation): guides the
+ * model to answer with formatted markdown instead of wrapping everything in
+ * a code fence, which the renderer would then show as raw source. */
+const CHAT_SYS =
+  'You are a friendly learning tutor in a chat app. ' +
+  'Format your reply with Markdown when it helps — ## headings, **bold**, ' +
+  '- bullet lists, `inline code`. Reply directly with the formatted text; ' +
+  'never wrap the whole answer in a code fence.';
+
 function renderMessages() {
   messagesEl.innerHTML =
     state.messages.map(messageHtml).join('') ||
@@ -353,7 +418,7 @@ async function sendMessage() {
     input.focus();
   });
   streamer.start();
-  streamChat(cleanHistory(state.messages), streamer);
+  streamChat([{ role: 'system', content: CHAT_SYS }, ...cleanHistory(state.messages)], streamer);
 }
 
 /* Serializable snapshot of all explain windows (no runtime fields). */
@@ -533,6 +598,7 @@ function buildExplainSystem(selection, parentId) {
       '',
       'Explain the selected text in simple, clear terms. Define any difficult words, terms, or concepts.',
       'Use short examples when helpful. Keep the explanation focused on the selected text.',
+      'Format answers with Markdown when helpful (## headings, **bold**, lists) — reply directly, never inside a code fence.',
       'The student may ask follow-up questions in this panel — answer them using the lesson context above.',
     ].join('\n');
   }
@@ -552,6 +618,7 @@ function buildExplainSystem(selection, parentId) {
     '',
     'Explain the selected text in simple, clear terms. Define any difficult words, terms, or concepts.',
     'Use short examples when helpful. Keep the explanation focused on the selected text.',
+    'Format answers with Markdown when helpful (## headings, **bold**, lists) — reply directly, never inside a code fence.',
     'The student may ask follow-up questions in this panel — answer them using the context above.',
   ].join('\n');
 }
@@ -2034,11 +2101,11 @@ function renderSummary(entry, status) {
       <button type="button" class="summary-collapse" id="sum-collapse"
               aria-expanded="${summaryExpanded}">
         <span class="caret">${summaryExpanded ? '▾' : '▸'}</span>
-        <span class="summary-headline">${escapeHtml(String(entry.headline || ''))}</span>
+        <span class="summary-headline">${renderInline(escapeHtml(String(entry.headline || '')))}</span>
       </button>
       <div class="summary-details"${summaryExpanded ? '' : ' hidden'}>
         <ul class="summary-points">${(entry.points || [])
-          .map((p) => `<li>${escapeHtml(p)}</li>`)
+          .map((p) => `<li>${renderInline(escapeHtml(String(p)))}</li>`)
           .join('')}</ul>
       </div>
     </div>`;
@@ -2571,14 +2638,14 @@ function renderQuiz() {
           (100 * (i + 1)) / qs.length
         )}%"></div></div>
       </div>
-      <div class="quiz-q">${escapeHtml(q.q)}</div>
+      <div class="quiz-q">${renderInline(escapeHtml(q.q))}</div>
       <div class="quiz-options">
         ${q.options
           .map(
             (o, oi) => `
           <button type="button" class="quiz-opt${picked === oi ? ' picked' : ''}" data-opt="${oi}">
             <span class="opt-letter">${String.fromCharCode(65 + oi)}</span>
-            <span class="opt-text">${escapeHtml(String(o))}</span>
+            <span class="opt-text">${renderInline(escapeHtml(String(o)))}</span>
           </button>`
           )
           .join('')}
@@ -2665,18 +2732,18 @@ function renderResults() {
               it.picked == null ? '—' : String(opts[it.picked] != null ? opts[it.picked] : '—');
             const correctTxt = String(opts[it.answer] != null ? opts[it.answer] : '—');
             const line = ok
-              ? 'Your answer: ' + escapeHtml(pickedTxt)
+              ? 'Your answer: ' + renderInline(escapeHtml(pickedTxt))
               : 'Your answer: <s>' +
-                escapeHtml(pickedTxt) +
+                renderInline(escapeHtml(pickedTxt)) +
                 '</s> · Correct: <b>' +
-                escapeHtml(correctTxt) +
+                renderInline(escapeHtml(correctTxt)) +
                 '</b>';
             return `<li class="${ok ? 'ok' : 'bad'}">
-              <div class="res-q"><span class="res-mark">${ok ? '✓' : '✗'}</span>${idx + 1}. ${escapeHtml(
-                String(it.q || '')
+              <div class="res-q"><span class="res-mark">${ok ? '✓' : '✗'}</span>${idx + 1}. ${renderInline(
+                escapeHtml(String(it.q || ''))
               )}</div>
               <div class="res-line">${line}</div>
-              ${it.why ? `<div class="res-why">${escapeHtml(String(it.why))}</div>` : ''}
+              ${it.why ? `<div class="res-why">${renderInline(escapeHtml(String(it.why)))}</div>` : ''}
             </li>`;
           })
           .join('')}

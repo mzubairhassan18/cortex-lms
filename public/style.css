@@ -282,6 +282,22 @@ body.compact-header #model-select {
 .bubble ul, .bubble ol { padding-left: 22px; margin: 6px 0; }
 .bubble p { margin: 4px 0; }
 .bubble strong { color: var(--accent2); }
+.bubble h4, .bubble h5, .bubble h6 { margin: 8px 0 4px; font-size: 1em; font-weight: 700; }
+.bubble a { color: var(--accent2); text-decoration: underline; }
+.bubble blockquote {
+  margin: 6px 0;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--border);
+  color: var(--text-dim);
+}
+.bubble hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.bubble table { border-collapse: collapse; margin: 8px 0; font-size: 14px; }
+.bubble th, .bubble td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; }
+.bubble th { background: var(--bg-panel); font-weight: 600; }
+.bubble li > p { margin: 0; }
+.bubble li + li { margin-top: 2px; }
+.bubble ul.contains-task-list { list-style: none; padding-left: 4px; }
+.bubble input[type='checkbox'] { margin-right: 6px; accent-color: var(--accent2); }
 
 /* ---------------- Input forms ---------------- */
 
@@ -819,6 +835,27 @@ mark.explain-src:hover { background: rgba(250, 227, 104, 0.45); }
   font-size: 13px;
   line-height: 1.7;
 }
+
+/* Markdown inside the summary / test / results cards (inline only) */
+.summary-card code,
+.quiz-card code,
+.results-card code {
+  background: var(--bg-panel);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.92em;
+}
+.summary-headline code { background: var(--bg-panel); }
+.summary-points strong,
+.results-card strong,
+.quiz-card strong { color: var(--accent2); }
+.summary-card a,
+.results-card a,
+.quiz-card a { color: var(--accent2); }
+.summary-card em,
+.results-card em,
+.quiz-card em { font-style: italic; opacity: 0.95; }
 
 /* ---------------- Collapsible summary card ---------------- */
 
