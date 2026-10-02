@@ -68,6 +68,14 @@ const setMessage = $('set-message');
 const footerModel = $('footer-model');
 const footerInfo = $('footer-info');
 const popup = $('selection-popup');
+const libraryBtn = $('library-btn');
+const libraryOverlay = $('library-overlay');
+const libraryClose = $('library-close');
+const libraryBody = $('library-body');
+const attachChips = $('attach-chips');
+const attachBtn = $('attach-btn');
+const linkBtn = $('link-btn');
+const fileInput = $('file-input');
 
 /* ================= Safe markdown rendering ================= */
 
@@ -171,10 +179,105 @@ function renderMarkdown(src) {
   return legacyMarkdown(text);
 }
 
-function messageHtml(m) {
+/* Learning Bot badge shown at the top-left edge of assistant responses. */
+const AVATAR_SVG =
+  '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+  '<path d="M12 4 2.5 8.6 12 13.2 21.5 8.6 12 4Z" fill="#11111b"/>' +
+  '<path d="M6.5 11.2V15c0 1.5 2.5 2.8 5.5 2.8s5.5-1.3 5.5-2.8v-3.8" fill="none" stroke="#11111b" stroke-width="1.7" stroke-linecap="round"/>' +
+  '<path d="M20.6 9.3v4.6" fill="none" stroke="#11111b" stroke-width="1.6" stroke-linecap="round"/>' +
+  '</svg>';
+
+function messageHtml(m, i, scope) {
   const isUser = m.role === 'user';
-  return `<div class="msg ${isUser ? 'user' : 'assistant'}"><div class="bubble">${renderMarkdown(m.content)}</div></div>`;
+  const bubble = `<div class="bubble">${renderMarkdown(m.content)}</div>`;
+  if (isUser) return `<div class="msg user">${bubble}</div>`;
+  return (
+    `<div class="msg assistant">` +
+    `<span class="msg-avatar" title="Learning Bot">${AVATAR_SVG}</span>` +
+    `<div class="msg-body">${bubble}` +
+    `<button type="button" class="msg-copy" data-i="${i}"${scope ? ` data-scope="${scope}"` : ''} title="Copy the whole response">⧉ Copy</button>` +
+    `</div></div>`
+  );
 }
+
+/* ================= Copy helpers ================= */
+
+async function copyText(text, btn) {
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      ta.remove();
+    } catch {
+      ok = false;
+    }
+  }
+  if (btn) {
+    const old = btn.innerHTML;
+    btn.textContent = ok ? '✓ Copied' : '✗ Failed';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.innerHTML = old;
+      btn.classList.remove('copied');
+    }, 1500);
+  }
+  return ok;
+}
+
+/* Wrap each <pre> in a header strip carrying its language + a copy button. */
+function decorateCopy(root) {
+  if (!root) return;
+  root.querySelectorAll('pre').forEach((pre) => {
+    if (pre.closest('.code-wrap')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'code-wrap';
+    pre.parentNode.insertBefore(wrap, pre);
+    const head = document.createElement('div');
+    head.className = 'code-lang';
+    const codeEl = pre.querySelector('code');
+    const m = codeEl && (codeEl.className.match(/language-([\w+#.-]+)/) || [])[1];
+    head.textContent = m || 'code';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'code-copy';
+    btn.title = 'Copy code to clipboard';
+    btn.textContent = '⧉ Copy';
+    const bar = document.createElement('div');
+    bar.className = 'code-head';
+    bar.appendChild(head);
+    bar.appendChild(btn);
+    wrap.appendChild(bar);
+    wrap.appendChild(pre);
+  });
+}
+
+/* One delegated listener: copy buttons anywhere (chat, explainers, quiz…). */
+document.addEventListener('click', (e) => {
+  const codeBtn = e.target.closest('.code-copy');
+  if (codeBtn) {
+    const pre = codeBtn.closest('.code-wrap');
+    if (pre) copyText(pre.querySelector('pre').innerText.replace(/\n+$/, ''), codeBtn);
+    return;
+  }
+  const respBtn = e.target.closest('.msg-copy');
+  if (respBtn) {
+    const scope = respBtn.dataset.scope;
+    const arr = scope
+      ? (state.explains.nodes[scope] || {}).messages
+      : state.messages;
+    const m = arr && arr[+respBtn.dataset.i];
+    if (m) copyText(m.content, respBtn);
+  }
+});
 
 /* ================= Typewriter streamer ================= */
 /* Reveals received text character-by-character into a pending bubble. */
@@ -190,9 +293,17 @@ function makeStreamer(container, onFinish) {
     if (!bubble) {
       const wrap = document.createElement('div');
       wrap.className = 'msg assistant';
+      const av = document.createElement('span');
+      av.className = 'msg-avatar';
+      av.title = 'Learning Bot';
+      av.innerHTML = AVATAR_SVG;
+      wrap.appendChild(av);
+      const body = document.createElement('div');
+      body.className = 'msg-body';
       const b = document.createElement('div');
       b.className = 'bubble thinking';
-      wrap.appendChild(b);
+      body.appendChild(b);
+      wrap.appendChild(body);
       container.appendChild(wrap);
       bubble = b;
       scrollDown(container);
@@ -369,15 +480,18 @@ const CHAT_SYS =
 
 function renderMessages() {
   messagesEl.innerHTML =
-    state.messages.map(messageHtml).join('') ||
+    state.messages.map((m, i) => messageHtml(m, i)).join('') ||
     '<div class="empty">👋 Start learning! Ask me anything.<br><br>Tip: select or double-click any text to get an explanation in a side panel.</div>';
+  decorateCopy(messagesEl); // header strip + copy button on every code block
   highlightSources(messagesEl, null); // highlight text that has explanations
   scrollDown(messagesEl);
 }
 
+/* Input stays ENABLED during generation (you can keep typing ahead);
+ * only the send button disables and shows the chasing-dots animation. */
 function setMainInputEnabled(on) {
-  input.disabled = !on;
   sendBtn.disabled = !on;
+  sendBtn.classList.toggle('busy', !on);
 }
 
 async function createConversation() {
@@ -390,6 +504,9 @@ async function createConversation() {
   state.conversations.unshift(conv);
   state.currentId = conv.id;
   state.messages = [];
+  state.notes = []; // personal notes are per-conversation too
+  state.files = []; // attachments are per-conversation too
+  renderChips();
   clearExplainWindows(); // fresh explain panel for a new conversation
   delete summaryCache[conv.id];
   delete quizCache[conv.id];
@@ -430,7 +547,9 @@ async function sendMessage() {
     input.focus();
   });
   streamer.start();
-  streamChat([{ role: 'system', content: CHAT_SYS }, ...cleanHistory(state.messages)], streamer);
+  // Attached documents ride along in the system prompt (prefetched text).
+  const sys = CHAT_SYS + (await filesContext());
+  streamChat([{ role: 'system', content: sys }, ...cleanHistory(state.messages)], streamer);
 }
 
 /* Serializable snapshot of all explain windows (no runtime fields). */
@@ -521,6 +640,19 @@ async function selectConversation(id) {
     if (res.ok) conv = await res.json();
   } catch { /* ignore */ }
   state.messages = (conv && conv.messages) || [];
+  state.notes = (conv && conv.notes) || [];
+  state.files = (conv && conv.files) || [];
+  renderChips();
+  // Start pulling extracted text in the background so the next message
+  // already has the documents in its system prompt.
+  for (const f of state.files) {
+    if (!f.link) prefetchFileText(id, f.id);
+  }
+  // Notes that never got their background AI polish (page closed mid-job)
+  // are retried every time the conversation opens.
+  for (const n of state.notes) {
+    if (!n.polished) enqueueBg(() => polishNote(id, n.id));
+  }
 
   renderMessages();
   renderConversationList();
@@ -746,8 +878,9 @@ function renderPanelMessages(node) {
   if (!el) return;
   const box = el.querySelector('.explain-messages');
   box.innerHTML =
-    node.messages.map(messageHtml).join('') ||
+    node.messages.map((m, i) => messageHtml(m, i, node.id)).join('') ||
     '<div class="empty">The explanation will appear here.</div>';
+  decorateCopy(box);
   highlightSources(box, node.id); // nested selections made in this container
   scrollDown(box);
 }
@@ -1154,10 +1287,36 @@ function sendExplain(container) {
 
 /* ================= Text selection popup ================= */
 
-function showPopup(rect, text, originId) {
+/* Text of a bubble WITHOUT the copy-button chrome: strip code headers and
+ * add our own block separators (textContent has none, innerText would drag
+ * the button/lang labels along). */
+function bubbleText(bubble) {
+  if (!bubble) return '';
+  const clone = bubble.cloneNode(true);
+  clone.querySelectorAll('.code-head').forEach((el) => el.remove());
+  clone.querySelectorAll('pre').forEach((el) => el.insertAdjacentText('beforebegin', '\n\n'));
+  clone
+    .querySelectorAll('p, div, li, h1, h2, h3, h4, h5, h6, tr, blockquote')
+    .forEach((el) => el.insertAdjacentText('beforeend', '\n'));
+  return clone.textContent.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/* The message around the selection — kept so saved notes stay understandable
+ * later (role + the text of that bubble). */
+function noteSourceFrom(anchor) {
+  const el = anchor && (anchor.nodeType === 1 ? anchor : anchor.parentElement);
+  const msg = el && el.closest('.msg');
+  if (!msg) return '';
+  const role = msg.classList.contains('user') ? 'user' : 'assistant';
+  const txt = bubbleText(msg.querySelector('.bubble')).slice(0, 4000);
+  return JSON.stringify({ role, text: txt });
+}
+
+function showPopup(rect, text, originId, src) {
   popup.dataset.text = text;
   popup.dataset.origin = originId || ''; // '' = main chat (root window)
-  popup.style.display = 'block';
+  popup.dataset.src = src || '';
+  popup.style.display = 'flex';
   popup.style.left = `${rect.left}px`;
   popup.style.top = `${rect.bottom + 8}px`;
 }
@@ -1180,7 +1339,7 @@ function makeSelectionHandlers(container, originOf) {
     setTimeout(() => {
       const found = selectionWithin(container);
       if (!found) { hidePopup(); return; }
-      showPopup(found.rect, found.text, originOf(found.sel.anchorNode));
+      showPopup(found.rect, found.text, originOf(found.sel.anchorNode), noteSourceFrom(found.sel.anchorNode));
     }, 10);
   });
 
@@ -1205,15 +1364,396 @@ makeSelectionHandlers(explainPanels, (anchor) => {
   return panel ? panel.dataset.id : '';
 });
 
-popup.addEventListener('click', () => {
+popup.addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
   const text = popup.dataset.text;
   const origin = popup.dataset.origin || '';
+  const src = popup.dataset.src || '';
   hidePopup();
-  if (text) createExplainWindow(text, origin || null);
+  if (btn.dataset.act === 'note') {
+    saveNote(text, src);
+  } else if (text) {
+    createExplainWindow(text, origin || null);
+  }
 });
 
 document.addEventListener('mousedown', (e) => {
   if (!popup.contains(e.target)) hidePopup();
+});
+
+/* ================= Personal notes =================
+ * Notes are stored per conversation (server-side) OUTSIDE the AI summary,
+ * so regenerating the summary never overwrites what the user saved.
+ * Capture: instant + verbatim (never blocked, never fails), then an
+ * optional background LLM pass polishes the fragment into a one-line
+ * study note (✨). If the model is slow/down, the verbatim note stands. */
+
+let toastTimer = null;
+function showToast(html) {
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = html;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+function persistNotes() {
+  if (!state.currentId) return;
+  fetch(`/api/conversations/${state.currentId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notes: state.notes || [] }),
+  }).catch(() => {});
+}
+
+/* The sentence containing the selection — so a mid-sentence highlight
+ * ("stores a value in") still reads with its surroundings later. */
+function sentenceAround(full, sel) {
+  if (!full || !sel) return '';
+  const i = full.indexOf(sel);
+  if (i < 0) return full.slice(0, 240).trim(); // selection spans odd boundaries
+  const end = i + sel.length;
+  let s = full.lastIndexOf('. ', i);
+  s = s < 0 ? 0 : s + 2;
+  let e = full.indexOf('. ', end);
+  if (e < 0) e = Math.min(full.length, end + 120);
+  else e += 1;
+  const out = full.slice(s, e).trim();
+  return out.length > 400 ? `${out.slice(0, 397)}…` : out;
+}
+
+async function saveNote(text, src) {
+  if (!text) return;
+  if (!state.currentId) await createConversation();
+  let srcObj = null;
+  try {
+    srcObj = src ? JSON.parse(src) : null;
+  } catch { /* no context available */ }
+  const note = {
+    id: `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    text,               // what is shown (verbatim until polished)
+    raw: text,          // the original highlight (kept for re-polish/reference)
+    context: sentenceAround((srcObj && srcObj.text) || '', text),
+    role: (srcObj && srcObj.role) || 'assistant',
+    polished: false,
+    at: Date.now(),
+  };
+  state.notes = state.notes || [];
+  state.notes.push(note);
+  persistNotes();
+  renderSummary(summaryCache[state.currentId] || null, lastSummaryStatus || '');
+  showToast('📌 Saved to notes');
+  // Non-blocking polish: any model the Auto route picks; failure = verbatim.
+  enqueueBg(() => polishNote(state.currentId, note.id));
+}
+
+/* Background AI polish — turns the fragment into a standalone one-liner. */
+async function polishNote(convId, noteId) {
+  if (convId !== state.currentId) return; // note already saved verbatim
+  const note = (state.notes || []).find((n) => n.id === noteId);
+  if (!note || note.polished) return;
+  try {
+    const txt = await bgRequest(
+      [
+        {
+          role: 'system',
+          content: [
+            'Rewrite a highlighted fragment from a study conversation into ONE standalone study note.',
+            'Rules: at most 25 words, plain statement, keep the original meaning,',
+            'supply the missing subject from the source sentence when the fragment needs one.',
+            'Output ONLY the note — no quotes, no labels, no bullet, no explanation.',
+          ].join('\n'),
+        },
+        {
+          role: 'user',
+          content: `Fragment: ${note.raw}${note.context ? `\nSource sentence: ${note.context}` : ''}`,
+        },
+      ],
+      null,
+      { temperature: 0.3, maxTokens: 120 }
+    );
+    const clean = (txt || '')
+      .replace(/^[-*•]\s+/, '')
+      .replace(/^["'“”]+|["'“”]+$/g, '')
+      .trim();
+    if (clean && clean.length <= 240 && !/^\s*⚠|error/i.test(clean)) {
+      note.text = clean;
+      note.polished = true;
+      persistNotes();
+      if (state.currentId === convId) {
+        renderSummary(summaryCache[convId] || null, lastSummaryStatus || '');
+      }
+    }
+  } catch { /* keep the verbatim note */ }
+}
+
+/* "📌 Your notes" card — rendered under the AI summary, always present. */
+function notesSectionHtml() {
+  const notes = state.notes || [];
+  if (!notes.length) {
+    return `
+    <div class="notes-card notes-empty-card">
+      <div class="notes-head">📌 Your notes</div>
+      <div class="notes-hint">Select any text in the chat and press 📌 Note — your notes live here and survive summary regeneration.</div>
+    </div>`;
+  }
+  return `
+    <div class="notes-card">
+      <div class="notes-head">📌 Your notes <span class="notes-count">${notes.length}</span></div>
+      <ul class="notes-list">
+        ${notes
+          .map((n) => {
+            const ctx = String(n.context || '');
+            const shown = ctx.length > 160 ? `${ctx.slice(0, 157)}…` : ctx;
+            return `
+        <li class="note-item" data-note="${n.id}">
+          <div class="note-text">${renderInline(escapeHtml(String(n.text || '')))}${
+            n.polished
+              ? ' <span class="note-ai" title="AI-polished from your highlight">✨</span>'
+              : ''
+          }</div>
+          ${shown ? `<div class="note-src">from: “${escapeHtml(shown)}”</div>` : ''}
+          <button type="button" class="note-del" data-note="${n.id}" title="Delete this note">✕</button>
+        </li>`;
+          })
+          .join('')}
+      </ul>
+    </div>`;
+}
+
+/* ================= Files: chips, upload, Library =================
+ * Attachments live per conversation (data/uploads/<convId>/). Extracted
+ * text is fetched once and injected into this conversation's system prompt
+ * on send; the UI only ever shows a small chip. */
+
+const fileTextCache = {}; // convId -> { fid: text }
+
+function fmtSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderChips() {
+  const files = state.files || [];
+  attachChips.hidden = !files.length;
+  attachChips.innerHTML = files
+    .map(
+      (f) => `
+    <span class="chip ${f.link ? 'chip-link' : ''}" title="${escapeHtml(f.link || f.name)}">
+      <span class="chip-ico">${f.link ? '🔗' : '📎'}</span>
+      <span class="chip-name">${escapeHtml(f.name)}</span>
+      <span class="chip-meta">${f.link ? 'link' : fmtSize(f.size)}</span>
+      <button type="button" class="chip-x" data-fid="${f.id}" title="Remove this attachment">✕</button>
+    </span>`
+    )
+    .join('');
+}
+
+attachChips.addEventListener('click', (e) => {
+  const x = e.target.closest('.chip-x');
+  if (x) removeFile(x.dataset.fid);
+});
+
+function readFileB64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    r.readAsDataURL(file);
+  });
+}
+
+async function uploadFiles(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+  if (!state.currentId) await createConversation();
+  for (const file of files) {
+    try {
+      const data = await readFileB64(file);
+      const res = await fetch(`/api/conversations/${state.currentId}/files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: file.name, data }),
+      });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error || 'Upload failed');
+      state.files = state.files || [];
+      state.files.push(out.file);
+      renderChips();
+      if (!out.file.link) prefetchFileText(state.currentId, out.file.id);
+      showToast(`📎 Attached ${escapeHtml(out.file.name)}`);
+    } catch (e) {
+      showToast(`⚠️ ${escapeHtml(e.message || 'Upload failed')}`);
+    }
+  }
+}
+
+async function attachLink() {
+  const url = (prompt('Link to attach with this conversation:') || '').trim();
+  if (!url) return;
+  if (!state.currentId) await createConversation();
+  try {
+    const res = await fetch(`/api/conversations/${state.currentId}/files`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ link: url }),
+    });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error || 'Could not attach link');
+    state.files = state.files || [];
+    state.files.push(out.file);
+    renderChips();
+    showToast(`🔗 Attached ${escapeHtml(out.file.name)}`);
+  } catch (e) {
+    showToast(`⚠️ ${escapeHtml(e.message || 'Could not attach link')}`);
+  }
+}
+
+async function removeFile(fid) {
+  const convId = state.currentId;
+  state.files = (state.files || []).filter((f) => f.id !== fid);
+  renderChips();
+  if (fileTextCache[convId]) delete fileTextCache[convId][fid];
+  if (convId) {
+    fetch(`/api/conversations/${convId}/files/${fid}`, { method: 'DELETE' }).catch(() => {});
+  }
+  showToast('📎 Attachment removed');
+}
+
+function prefetchFileText(convId, fid) {
+  const cache = fileTextCache[convId] || (fileTextCache[convId] = {});
+  if (cache[fid] != null) return Promise.resolve(cache[fid]);
+  return fetch(`/api/conversations/${convId}/files/${fid}/text`)
+    .then((res) => (res.ok ? res.json() : { text: '' }))
+    .then((out) => {
+      cache[fid] = out.text || '';
+      return cache[fid];
+    })
+    .catch(() => '');
+}
+
+/* The document block appended to the system prompt on send. */
+async function filesContext() {
+  const files = state.files || [];
+  if (!files.length) return '';
+  const convId = state.currentId;
+  const cache = fileTextCache[convId] || (fileTextCache[convId] = {});
+  const parts = [];
+  for (const f of files) {
+    if (f.link) {
+      parts.push(`=== ${f.name} ===\nLink the user shared: ${f.link}`);
+      continue;
+    }
+    let txt = cache[f.id];
+    if (txt == null) txt = await prefetchFileText(convId, f.id);
+    if (txt) parts.push(`=== ${f.name} ===\n${txt.slice(0, 20000)}`);
+  }
+  if (!parts.length) return '';
+  return (
+    '\n\nAttached by the user to THIS conversation (use them when relevant):\n' +
+    parts.join('\n\n')
+  );
+}
+
+/* Buttons + drag & drop. */
+attachBtn.addEventListener('click', () => fileInput.click());
+linkBtn.addEventListener('click', attachLink);
+fileInput.addEventListener('change', () => {
+  if (fileInput.files && fileInput.files.length) uploadFiles(fileInput.files);
+  fileInput.value = ''; // allow re-picking the same file later
+});
+
+['dragenter', 'dragover'].forEach((ev) =>
+  inputForm.addEventListener(ev, (e) => {
+    if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return;
+    e.preventDefault();
+    inputForm.classList.add('dropping');
+  })
+);
+inputForm.addEventListener('dragleave', () => inputForm.classList.remove('dropping'));
+inputForm.addEventListener('drop', (e) => {
+  if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+  e.preventDefault();
+  inputForm.classList.remove('dropping');
+  uploadFiles(e.dataTransfer.files);
+});
+
+/* ---------- Library overlay ---------- */
+
+libraryBtn.addEventListener('click', () => {
+  setSummaryOverlay(false);
+  settingsOverlay.classList.add('hidden');
+  libraryOverlay.classList.remove('hidden');
+  libraryBtn.classList.add('on');
+  renderLibrary();
+});
+libraryClose.addEventListener('click', () => {
+  libraryOverlay.classList.add('hidden');
+  libraryBtn.classList.remove('on');
+});
+
+async function renderLibrary() {
+  libraryBody.innerHTML = '<div class="lib-empty">Loading…</div>';
+  try {
+    const res = await fetch('/api/files');
+    const files = await res.json();
+    if (!Array.isArray(files) || !files.length) {
+      libraryBody.innerHTML =
+        '<div class="lib-empty">No files yet — press ＋ next to the input (or drag &amp; drop) to attach Word, PDF or text files and links.</div>';
+      return;
+    }
+    libraryBody.innerHTML =
+      '<div class="lib-list">' +
+      files
+        .map(
+          (f) => `
+      <div class="lib-row">
+        <span class="lib-ico">${f.link ? '🔗' : '📎'}</span>
+        <div class="lib-main">
+          <div class="lib-name" title="${escapeHtml(f.link || f.name)}">${escapeHtml(f.name)}</div>
+          <div class="lib-meta">${escapeHtml(f.convTitle || 'Conversation')} · ${
+            f.link ? 'link' : fmtSize(f.size)
+          } · ${new Date(f.at || Date.now()).toLocaleString()}</div>
+        </div>
+        <button type="button" class="lib-open" data-conv="${f.convId}">Open</button>
+        <button type="button" class="lib-del" data-conv="${f.convId}" data-fid="${f.id}" title="Delete file">✕</button>
+      </div>`
+        )
+        .join('') +
+      '</div>';
+  } catch {
+    libraryBody.innerHTML = '<div class="lib-empty">Could not load the library.</div>';
+  }
+}
+
+libraryBody.addEventListener('click', async (e) => {
+  const open = e.target.closest('.lib-open');
+  if (open) {
+    libraryOverlay.classList.add('hidden');
+    libraryBtn.classList.remove('on');
+    await selectConversation(open.dataset.conv);
+    return;
+  }
+  const del = e.target.closest('.lib-del');
+  if (del) {
+    const { conv, fid } = del.dataset;
+    if (!confirm('Delete this file from the library?')) return;
+    await fetch(`/api/conversations/${conv}/files/${fid}`, { method: 'DELETE' }).catch(() => {});
+    if (conv === state.currentId) {
+      state.files = (state.files || []).filter((f) => f.id !== fid);
+      if (fileTextCache[conv]) delete fileTextCache[conv][fid];
+      renderChips();
+    }
+    renderLibrary();
+  }
 });
 
 /* ================= Main chat | explainer resize ================= */
@@ -1639,20 +2179,33 @@ explainsToggle.addEventListener('click', () => {
 
 /* ---------- Topics summary overlay ---------- */
 
+/* Opening/closing the Summary overlay also flips the toolbar button to its
+ * active (filled) state and hides the explainer tabs above the overlay.
+ * Only one overlay may be open at a time. */
+function setSummaryOverlay(open) {
+  summaryOverlay.classList.toggle('hidden', !open);
+  document.body.classList.toggle('summary-open', open);
+  summaryBtn.classList.toggle('on', open);
+  if (open) {
+    libraryOverlay.classList.add('hidden');
+    libraryBtn.classList.remove('on');
+  }
+}
+
 summaryBtn.addEventListener('click', () => {
   const panelHidden = !state.sidebar.open;
   const overlayHidden = summaryOverlay.classList.contains('hidden');
   if (panelHidden || overlayHidden) {
     settingsOverlay.classList.add('hidden'); // only one overlay at a time
-    summaryOverlay.classList.remove('hidden');
+    setSummaryOverlay(true);
     if (panelHidden) showSidebar(); // overlay lives over the containers
     showCachedSummary();
     runBackgroundJobs(state.currentId, state.messages, explainSnapshot(), false);
   } else {
-    summaryOverlay.classList.add('hidden'); // close -> containers visible again
+    setSummaryOverlay(false); // close -> containers visible again
   }
 });
-summaryClose.addEventListener('click', () => summaryOverlay.classList.add('hidden'));
+summaryClose.addEventListener('click', () => setSummaryOverlay(false));
 summaryRefresh.addEventListener('click', () => {
   renderSummary(summaryCache[state.currentId], 'summarizing…');
   runBackgroundJobs(state.currentId, state.messages, explainSnapshot(), true);
@@ -1661,7 +2214,9 @@ summaryRefresh.addEventListener('click', () => {
 /* ---------- Settings overlay (provider + API key) ---------- */
 
 settingsBtn.addEventListener('click', () => {
-  summaryOverlay.classList.add('hidden'); // only one overlay at a time
+  setSummaryOverlay(false); // only one overlay at a time
+  libraryOverlay.classList.add('hidden');
+  libraryBtn.classList.remove('on');
   const panelHidden = !state.sidebar.open;
   settingsOverlay.classList.remove('hidden');
   if (panelHidden) showSidebar();
@@ -1928,10 +2483,12 @@ const SUMMARY_SYS_MERGE = [
 ].join('\n');
 
 const SUMMARY_SYS_REDUCE = [
-  'You condense study notes into a short learning-session summary.',
-  'Output EXACTLY this format and nothing else:',
+  'You condense study notes into a short learning-object summary for a student.',
+  'Output EXACTLY this structure and nothing else:',
   'Line 1: one single sentence (max 25 words) summarizing what the student is learning and has achieved.',
-  'Then 3 to 10 bullet points, one per line, each starting with "- ", naming concrete topics learned (question -> what was learned).',
+  'Then the line "## Key findings" followed by 3 to 8 bullet points, one per line starting with "- ", naming the most important things learned (question -> what was learned).',
+  'Then the line "## Topics" followed by ONE line of 3 to 8 short topic tags separated by commas (no dashes, no sentence).',
+  'Then the line "## Questions you asked" followed by 1 to 6 bullet points, one per line starting with "- ", naming the questions the student actually asked in the session.',
   'Merge duplicate points, plain short lines, never repeat words, no preamble, no closing remarks.',
 ].join('\n');
 
@@ -2002,6 +2559,28 @@ function sanitizePoints(lines) {
     keys.push(key);
     out.push(line);
     if (out.length >= 12) break;
+  }
+  return out;
+}
+
+/* Topic tags are short by design — sanitizePoints would drop them (<12 chars). */
+function sanitizeTags(list) {
+  const out = [];
+  const keys = [];
+  for (let t of list || []) {
+    t = String(t)
+      .replace(/\s+/g, ' ')
+      .replace(/^([-*•]\s+|\d+[.)]\s+)+/, '')
+      .replace(/\*\*/g, '')
+      .replace(/^["'“”,.]+|["'“”,.]+$/g, '')
+      .trim()
+      .slice(0, 40);
+    if (t.length < 2) continue;
+    const key = t.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!key || keys.includes(key)) continue;
+    keys.push(key);
+    out.push(t);
+    if (out.length >= 8) break;
   }
   return out;
 }
@@ -2136,20 +2715,65 @@ function parseSummary(text) {
     .filter(Boolean);
   let headline = '';
   const points = [];
+  const topics = [];
+  const questions = [];
+  let section = 'findings';
   for (const l of lines) {
-    if (/^[-*•]\s+/.test(l)) {
-      points.push(l.replace(/^[-*•]\s+/, '').replace(/\*\*/g, '').trim());
-    } else if (!headline) {
-      headline = l
-        .replace(/^#+\s*/, '')
-        .replace(/\*\*/g, '')
-        .replace(/^["'“”]+|["'“”]+$/g, '')
-        .trim();
-    } else {
-      points.push(l.replace(/\*\*/g, '').trim());
+    // Section headers: "## Topics", "Topics:", "Questions you asked"…
+    const bare = l.replace(/^#+\s*/, '').replace(/[:：]\s*$/, '').trim();
+    if (/^key\s+findings?$/i.test(bare)) { section = 'findings'; continue; }
+    if (/^topics?$/i.test(bare)) { section = 'topics'; continue; }
+    if (/^questions?(\s+you\s+asked)?$/i.test(bare)) { section = 'questions'; continue; }
+
+    const isBullet = /^[-*•]\s+/.test(l);
+    const body = (isBullet ? l.replace(/^[-*•]\s+/, '') : l)
+      .replace(/\*\*/g, '')
+      .trim();
+
+    // Small models sometimes emit the list itself as a line instead of a
+    // header: "Topics: a, b, c" or "- Questions you asked: …".
+    const topicLine = body.match(/^(?:topics?|tags?)\s*[:：]\s*(.+)$/i);
+    if (topicLine && section !== 'questions') {
+      for (const t of topicLine[1].split(/[,;·/]+/)) {
+        const tt = t.trim();
+        if (tt) topics.push(tt);
+      }
+      continue;
+    }
+    const questionLine = body.match(
+      /^(?:questions?(?:\s+you\s+asked)?|your\s+questions)\s*[:：]\s*(.+)$/i
+    );
+    if (questionLine) {
+      questions.push(questionLine[1].replace(/^["'“”]+|["'“”]+$/g, '').trim());
+      continue;
+    }
+
+    if (section === 'topics') {
+      // Topics arrive as bullets or as one comma-separated line.
+      for (const t of body.split(/[,;·/]+/)) {
+        const tt = t.replace(/^[-*•]\s+/, '').trim();
+        if (tt) topics.push(tt);
+      }
+      continue;
+    }
+    if (section === 'questions') {
+      if (body) questions.push(body.replace(/^["'“”]+|["'“”]+$/g, ''));
+      continue;
+    }
+    if (isBullet) {
+      if (body) points.push(body);
+    } else if (!headline && !points.length) {
+      headline = body.replace(/^["'“”]+|["'“”]+$/g, '');
+    } else if (body) {
+      points.push(body); // legacy format: plain lines after the headline
     }
   }
-  return { headline: headline || 'Learning session', points };
+  return {
+    headline: headline || 'Learning session',
+    points,
+    topics,
+    questions,
+  };
 }
 
 function renderTestBadges() {
@@ -2173,15 +2797,27 @@ function renderSummary(entry, status) {
   summaryStatus.textContent = lastSummaryStatus;
   renderTestBadges();
 
-  // The learning-session card (headline + collapsible points).
-  if (!entry || (!entry.headline && !(entry.points || []).length)) {
-    summaryCardSlot.innerHTML = `<div class="summary-empty">No summary yet.${
+  const hasEntry =
+    entry &&
+    (entry.headline ||
+      (entry.points || []).length ||
+      (entry.topics || []).length ||
+      (entry.questions || []).length);
+
+  // Learning object: AI summary card (headline + key findings + topics +
+  // questions asked), then the user's own notes card below it.
+  let html = '';
+  if (!hasEntry) {
+    html += `<div class="summary-empty">No summary yet.${
       state.messages.length || Object.keys(state.explains.nodes).length
         ? ' Press ↻ to generate one.'
         : ' Chat or explain something first.'
     }</div>`;
   } else {
-    summaryCardSlot.innerHTML = `
+    const points = (entry.points || []).filter(Boolean);
+    const topics = (entry.topics || []).filter(Boolean);
+    const questions = (entry.questions || []).filter(Boolean);
+    html += `
     <div class="summary-card">
       <button type="button" class="summary-collapse" id="sum-collapse"
               aria-expanded="${summaryExpanded}">
@@ -2189,12 +2825,35 @@ function renderSummary(entry, status) {
         <span class="summary-headline">${renderInline(escapeHtml(String(entry.headline || '')))}</span>
       </button>
       <div class="summary-details"${summaryExpanded ? '' : ' hidden'}>
-        <ul class="summary-points">${(entry.points || [])
+        ${
+          points.length
+            ? `<div class="sum-group-label">🔎 Key findings</div>
+        <ul class="summary-points">${points
           .map((p) => `<li>${renderInline(escapeHtml(String(p)))}</li>`)
-          .join('')}</ul>
+          .join('')}</ul>`
+            : ''
+        }
+        ${
+          topics.length
+            ? `<div class="sum-group-label">🏷️ Topics</div>
+        <div class="sum-topics">${topics
+          .map((t) => `<span class="topic-tag">${escapeHtml(String(t))}</span>`)
+          .join('')}</div>`
+            : ''
+        }
+        ${
+          questions.length
+            ? `<div class="sum-group-label">❓ Questions you asked</div>
+        <ul class="summary-questions">${questions
+          .map((q) => `<li>${renderInline(escapeHtml(String(q)))}</li>`)
+          .join('')}</ul>`
+            : ''
+        }
       </div>
     </div>`;
   }
+  html += notesSectionHtml();
+  summaryCardSlot.innerHTML = html;
 
   renderTestSection();
 }
@@ -2320,9 +2979,11 @@ function runSummary(convId, messages, explains, force = false) {
         notes = next;
       }
 
-      // ---- REDUCE: final headline + 3-10 bullets ----
+      // ---- REDUCE: headline + key findings + topics + questions asked ----
       let headline = '';
       let points = [];
+      let topics = [];
+      let questions = [];
       if (!signal.aborted) {
         setStatus('summarizing…');
         const txt = await bgRequest(
@@ -2340,6 +3001,8 @@ function runSummary(convId, messages, explains, force = false) {
           const parsed = parseSummary(txt);
           headline = sanitizeHeadline(parsed.headline, '');
           points = sanitizePoints(parsed.points);
+          topics = sanitizeTags(parsed.topics);
+          questions = sanitizePoints(parsed.questions).slice(0, 6);
         }
       }
       if (signal.aborted) return;
@@ -2368,6 +3031,8 @@ function runSummary(convId, messages, explains, force = false) {
       const entry = {
         headline,
         points: points.slice(0, 10),
+        topics,
+        questions,
         fingerprint: fp,
         at: Date.now(),
       };
@@ -2843,6 +3508,15 @@ function renderResults() {
 /* ---------- Delegated clicks inside the summary overlay ---------- */
 
 summaryBody.addEventListener('click', (e) => {
+  // Delete a personal note (does not touch the AI summary).
+  const del = e.target.closest('.note-del');
+  if (del) {
+    const id = del.dataset.note;
+    state.notes = (state.notes || []).filter((n) => n.id !== id);
+    persistNotes();
+    renderSummary(summaryCache[state.currentId] || null, lastSummaryStatus);
+    return;
+  }
   // Collapsible header: show/hide the points (and the test button).
   if (e.target.closest('#sum-collapse')) {
     summaryExpanded = !summaryExpanded;

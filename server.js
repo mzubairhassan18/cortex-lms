@@ -8,6 +8,8 @@ const OLLAMA_URL = (process.env.OLLAMA_URL || 'http://localhost:11434').replace(
 const DATA_DIR = path.join(__dirname, 'data');
 const CONV_FILE = path.join(DATA_DIR, 'conversations.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads'); // per-conversation attachments
+const TEXT_CAP = 200000; // chars of extracted text kept per file (system prompt)
 
 // ---------- Provider settings (local Ollama or a cloud API) ----------
 // Providers — mainstream APIs plus the free tiers from
@@ -119,7 +121,7 @@ function friendlyNet(e) {
 const FIRST_BYTE_MS = Number(process.env.FIRST_BYTE_MS) || 120000;
 const IDLE_MS = Number(process.env.IDLE_MS) || 45000;
 
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '16mb' })); // room for uploaded files (base64)
 app.use(express.static(path.join(__dirname, 'public')));
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -181,6 +183,9 @@ app.put('/api/conversations/:id', (req, res) => {
   // Quiz (background-generated MCQs) and finished test reports.
   if ('quiz' in req.body) conv.quiz = req.body.quiz || null;
   if ('tests' in req.body) conv.tests = Array.isArray(req.body.tests) ? req.body.tests : [];
+  // Personal notes — kept OUTSIDE summary/quiz so AI regeneration never
+  // overwrites what the user saved.
+  if ('notes' in req.body) conv.notes = Array.isArray(req.body.notes) ? req.body.notes : [];
   if ('messages' in req.body || 'explains' in req.body) conv.updatedAt = Date.now();
   const firstUser = conv.messages.find((m) => m.role === 'user');
   if (firstUser && (!conv.title || conv.title === 'New conversation')) {
@@ -192,7 +197,149 @@ app.put('/api/conversations/:id', (req, res) => {
 
 app.delete('/api/conversations/:id', (req, res) => {
   saveConversations(loadConversations().filter((c) => c.id !== req.params.id));
+  // Drop the conversation's uploaded files as well.
+  try {
+    fs.rmSync(path.join(UPLOAD_DIR, req.params.id), { recursive: true, force: true });
+  } catch { /* nothing stored */ }
   res.json({ ok: true });
+});
+
+/* ================= File uploads: extraction + storage ================= */
+
+const TEXT_EXTS = ['.txt', '.md', '.markdown', '.csv', '.tsv', '.json', '.html', '.htm', '.log', '.xml', '.yml', '.yaml'];
+
+/* Returns extracted plain text (string or Promise). Word/PDF need the
+ * installed parsers; plain formats are just decoded. */
+function extractText(buf, name) {
+  const ext = path.extname(String(name || '')).toLowerCase();
+  if (TEXT_EXTS.includes(ext)) {
+    return buf.toString('utf8').replace(/^\uFEFF/, '');
+  }
+  if (ext === '.pdf') {
+    // pdf-parse v2 API: class-based (v1's pdf(buffer) no longer exists)
+    const { PDFParse } = require('pdf-parse');
+    const parser = new PDFParse({ data: buf });
+    return parser.getText().then((r) => String((r && r.text) || ''));
+  }
+  if (ext === '.docx') {
+    return require('mammoth')
+      .extractRawText({ buffer: buf })
+      .then((r) => String((r && r.value) || ''));
+  }
+  if (ext === '.doc') {
+    throw new Error('Old .doc files are not supported — open it and “Save as” .docx or PDF.');
+  }
+  throw new Error('Unsupported type — use Word (.docx), PDF, or a text file.');
+}
+
+function newFileId() {
+  return `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/* Upload: base64 file (JSON) or a plain link. Stores the original under
+ * data/uploads/<convId>/ plus the extracted text next to it. */
+app.post('/api/conversations/:id/files', async (req, res) => {
+  const list = loadConversations();
+  const conv = list.find((c) => c.id === req.params.id);
+  if (!conv) return res.status(404).json({ error: 'Not found' });
+  const body = req.body || {};
+  try {
+    let entry;
+    if (body.link) {
+      const url = String(body.link).trim();
+      if (!/^https?:\/\//i.test(url)) {
+        return res.status(400).json({ error: 'Links must start with http:// or https://' });
+      }
+      entry = {
+        id: newFileId(),
+        name: url.replace(/^https?:\/\//i, '').slice(0, 120),
+        link: url,
+        type: 'link',
+        size: 0,
+        chars: 0,
+        at: Date.now(),
+      };
+    } else if (body.data && body.name) {
+      const raw = Buffer.from(String(body.data), 'base64');
+      if (!raw.length) return res.status(400).json({ error: 'Empty file' });
+      if (raw.length > 12 * 1024 * 1024) {
+        return res.status(400).json({ error: 'File too large (max 12 MB)' });
+      }
+      const text = String(await Promise.resolve(extractText(raw, body.name)))
+        .replace(/\u0000/g, '')
+        .slice(0, TEXT_CAP);
+      const id = newFileId();
+      const safe = path.basename(String(body.name)).slice(0, 80) || 'file';
+      const fname = `${id}-${safe}`;
+      const dir = path.join(UPLOAD_DIR, conv.id);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, fname), raw);
+      fs.writeFileSync(`${path.join(dir, fname)}.txt`, text, 'utf8');
+      entry = {
+        id,
+        name: safe,
+        file: fname, // on-disk original (text sits at <file>.txt)
+        type: path.extname(safe).toLowerCase().replace('.', '') || 'file',
+        size: raw.length,
+        chars: text.length,
+        at: Date.now(),
+      };
+    } else {
+      return res.status(400).json({ error: 'Nothing uploaded' });
+    }
+    conv.files = Array.isArray(conv.files) ? conv.files : [];
+    conv.files.push(entry);
+    conv.updatedAt = Date.now();
+    saveConversations(list);
+    res.json({ file: entry });
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Upload failed' });
+  }
+});
+
+/* Extracted text — fetched by the client and injected into this
+ * conversation's system prompt when chatting. */
+app.get('/api/conversations/:id/files/:fid/text', (req, res) => {
+  const conv = loadConversations().find((c) => c.id === req.params.id);
+  if (!conv) return res.status(404).json({ error: 'Not found' });
+  const f = (conv.files || []).find((x) => x.id === req.params.fid);
+  if (!f) return res.status(404).json({ error: 'Not found' });
+  if (f.link) return res.json({ text: `Link reference: ${f.link}` });
+  try {
+    const txt = fs.readFileSync(`${path.join(UPLOAD_DIR, conv.id, f.file)}.txt`, 'utf8');
+    res.json({ text: txt });
+  } catch {
+    res.json({ text: '' });
+  }
+});
+
+/* Remove a chip: metadata + both files on disk. */
+app.delete('/api/conversations/:id/files/:fid', (req, res) => {
+  const list = loadConversations();
+  const conv = list.find((c) => c.id === req.params.id);
+  if (!conv) return res.status(404).json({ error: 'Not found' });
+  const f = (conv.files || []).find((x) => x.id === req.params.fid);
+  if (!f) return res.status(404).json({ error: 'Not found' });
+  conv.files = conv.files.filter((x) => x.id !== f.id);
+  conv.updatedAt = Date.now();
+  saveConversations(list);
+  if (f.file) {
+    try { fs.unlinkSync(path.join(UPLOAD_DIR, conv.id, f.file)); } catch { /* already gone */ }
+    try { fs.unlinkSync(`${path.join(UPLOAD_DIR, conv.id, f.file)}.txt`); } catch { /* already gone */ }
+  }
+  res.json({ ok: true });
+});
+
+/* Library: every file across every conversation (newest first). */
+app.get('/api/files', (req, res) => {
+  const out = [];
+  for (const c of loadConversations()) {
+    for (const f of c.files || []) {
+      out.push({ ...f, convId: c.id, convTitle: c.title });
+    }
+  }
+  out.sort((a, b) => (b.at || 0) - (a.at || 0));
+  res.json(out);
 });
 
 // ---------- Settings (provider + API key) ----------

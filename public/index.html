@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Learning Bot</title>
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -15,6 +16,7 @@
       <span id="current-title">New conversation</span>
       <button id="explains-toggle" class="hidden" title="Show explain windows">💡 <span class="btn-label">Explains</span> <span id="explains-count">0</span></button>
       <button id="summary-btn" title="Topics summary of this conversation">📋<span class="btn-label"> Summary</span></button>
+      <button id="library-btn" title="Library — every file you uploaded">📚<span class="btn-label"> Library</span></button>
       <div id="model-wrap" title="Model">
         <span id="model-icon">🤖</span>
         <select id="model-select" title="Model"></select>
@@ -43,9 +45,20 @@
       <div id="messages"></div>
 
       <form id="input-form">
+        <div id="attach-chips" hidden></div>
+        <button type="button" id="attach-btn" title="Attach a file — or drag &amp; drop onto the input">＋</button>
+        <button type="button" id="link-btn" title="Attach a link">🔗</button>
         <textarea id="input" rows="1" placeholder="Ask anything...  (Enter to send, Shift+Enter for new line)"></textarea>
-        <button type="submit" id="send-btn" title="Send">➤</button>
+        <button type="submit" id="send-btn" title="Send">
+          <svg class="send-idle" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 19V6.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+            <path d="M6.6 11.6 12 6.2l5.4 5.4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="send-busy" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        </button>
       </form>
+      <input type="file" id="file-input" multiple hidden
+             accept=".pdf,.docx,.txt,.md,.markdown,.csv,.tsv,.json,.html,.htm,.log,.xml,.yml,.yaml">
     </main>
 
     <!-- Drag handle to resize the explain sidebar -->
@@ -101,6 +114,14 @@
             <div id="set-message" class="set-message"></div>
           </div>
         </div>
+        <div id="library-overlay" class="hidden">
+          <div class="summary-head">
+            <span class="summary-title">📚 Library — every file</span>
+            <span id="library-status"></span>
+            <button id="library-close" title="Close" class="summary-x">✕</button>
+          </div>
+          <div id="library-body"></div>
+        </div>
       </div>
     </aside>
 
@@ -109,7 +130,10 @@
   </div><!-- /#app -->
 
   <!-- Floating popup shown when text is selected -->
-  <div id="selection-popup">💡 Explain</div>
+  <div id="selection-popup">
+    <button type="button" data-act="explain" title="Explain in a side panel">💡 Explain</button>
+    <button type="button" data-act="note" title="Save to my notes in the summary">📌 Note</button>
+  </div>
 
   <script src="vendor/marked.min.js"></script>
 <script src="app.js"></script>
