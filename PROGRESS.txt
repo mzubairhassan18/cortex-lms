@@ -1,0 +1,95 @@
+PROGRESS — Learning Bot v2
+==========================
+Companion to PLAN.md. READ PLAN.md FIRST if you have lost context.
+Update this file every time a item is checked off. Never delete a line —
+mark it, date it, and add a NOTE.
+
+Convention:
+  [ ] not started
+  [~] in progress
+  [x] done  (YYYY-MM-DD) + NOTE
+  [!] blocked + NOTE
+
+Last updated: 2026-10-03
+
+
+BASELINE
+--------
+[x] 2026-10-03  Commit all Preact work as a1d501b "converted to preact"
+               NOTE: 29 files, +4711/-3688. Working tree clean. Baseline for v2.
+[x] 2026-10-03  PLAN.md written (v2 plan, phases, open questions, decisions)
+[x] 2026-10-03  PROGRESS.txt written (this file)
+[x] 2026-10-03  Landing-page copywriting research done
+               NOTE: Fletch 6-tuple value prop (Persona/Alternative/Problem/
+               Capability/Feature/Benefit); hero must land in <10s; PAS + AIDA
+               + BAB spines; write 2nd person, short scannable lines; pair
+               benefits with concrete features; no fabricated testimonials —
+               use product-truth proof. Sources: landingrabbit.com/blog/
+               saas-landing-page-copywriting, DDG results for copywriting formulas.
+
+P1 — UI  (graph view, themes, landing page)
+-------------------------------------------
+[ ] P1.1  Header view toggle: list view <-> graph view, state persists on reload
+[ ] P1.2  graph/layout.js — horizontal tree layout (x=depth, y=leaf packing)
+[ ] P1.3  graph/graph.js — Preact graph view + SVG straight-arrow layer
+[ ] P1.4  Conversation node = compact card; click expands into REAL chat
+          container (chat box + send + attach +, reuse existing markup)
+[ ] P1.5  Explanation "+"/node affordance beside a conversation node
+[ ] P1.6  "+" draws straight arrow -> reveals explanation node
+[ ] P1.7  Nested explanations -> deeper nodes (tree, horizontal, any depth)
+[ ] P1.8  Summary node — large box reproducing the summary panel content,
+          opened from an icon/plus on the FIRST (conversation start) node
+[ ] P1.9  New chat: large "+" above first / below last node -> expands into a
+          typable, working empty conversation node
+[ ] P1.10 Select text -> Ask explain draws arrow + spawns explanation node
+[ ] P1.11 Collapse-on-scroll: off-screen explanation nodes shrink to compact
+          size so conversation nodes below stay reachable
+[ ] P1.12 Settings reachable from bottom-left in graph view
+[ ] P1.13 Library still opens as the sidebar overlay (no change)
+[ ] P1.14 Textured background
+[ ] P1.15 Theme system: light + dark, user-switchable, persists
+[ ] P1.16 Landing page at "/" (marketing copy, see research note above)
+
+P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
+------------------------------------------------------
+[ ] P2.1  Signup / login screen
+[ ] P2.2  Workspace picker — big cards; click enters the app
+[ ] P2.3  Create / rename / delete workspaces
+[ ] P2.4  Scope every read/write by user_id + workspace_id
+[ ] P2.5  BYOK: per-user provider + API key, stored SERVER-side, keyed to user
+[ ] P2.6  Proxy stays server-side (browsers cannot call OpenAI/Anthropic —
+          no CORS headers — so BYOK still needs a proxy)
+[ ] P2.7  Migrate existing local data/conversations.json into a workspace
+          [!] BLOCKED on Q6 (migrate existing 6 conversations? yes/no)
+
+P3 — SHIP
+---------
+[ ] P3.1  Choose hosting path [!] BLOCKED on Q4/Q5 (A: Express on free PaaS,
+          B: Supabase serverless)
+[ ] P3.2  Deploy + smoke test
+[ ] P3.3  Public URL
+
+OPEN QUESTIONS (see PLAN.md section 7)
+--------------------------------------
+[!] Q1  Graph: build in Preact+SVG, or migrate to React for React Flow?
+[!] Q2  Hosting path A vs B
+[!] Q3  Phase order — P1 first or auth/workspaces first?
+[!] Q4  Auth: Supabase Auth vs self-rolled?
+[!] Q5  Drizzle + state-lib — recommendation is BOTH NO (plain JS, no build step;
+        @preact/signals only if state actually gets painful)
+[!] Q6  Migrate the existing 6 local conversations?
+[!] Q7  "encapsulate under user preferences, no sidebar route, just give a
+        link" — meaning unclear, needs clarification
+[!] Q8  Graph view coexists with list view forever? (brief says toggle)
+
+DONE SO FAR (v1 — all shipped)
+------------------------------
+[x] 2026-10-03  Split public/app.js into ~20 ES modules, no build step
+[x] 2026-10-03  Preact + htm view layer (messages, explain, conv list,
+                summary, notes, quiz, results, library)
+[x] 2026-10-03  Perf/leak fixes (memoized markdown, streaming watchdogs,
+                bounded background jobs, pointer-capture drag)
+[x] 2026-10-03  OLLAMA_ENABLED for hosted boxes
+[x] 2026-10-03  conversations.json.bak + append-only .deleted.json archive +
+                POST /api/deleted/:id/restore + delete logging
+[x] 2026-10-03  README.md (setup, env vars, storage, deployment, architecture)
