@@ -1688,17 +1688,40 @@ inputForm.addEventListener('drop', (e) => {
 
 /* ---------- Library overlay ---------- */
 
+/* The library lives inside the explainer panel. Clicking the toolbar
+ * button must OPEN the panel first when it is closed (same as Summary),
+ * and on exit the panel is restored to its previous state when it was
+ * opened only for the library. Toggle: clicking the button again closes. */
+let libraryOpenedPanel = false;
+
 libraryBtn.addEventListener('click', () => {
+  if (!libraryOverlay.classList.contains('hidden')) {
+    closeLibrary();
+    return;
+  }
   setSummaryOverlay(false);
   settingsOverlay.classList.add('hidden');
+  const panelHidden = !state.sidebar.open;
+  if (panelHidden) showSidebar(); // the overlay lives over the containers
+  libraryOpenedPanel = panelHidden;
   libraryOverlay.classList.remove('hidden');
   libraryBtn.classList.add('on');
+  document.body.classList.add('library-open');
   renderLibrary();
 });
-libraryClose.addEventListener('click', () => {
+
+function closeLibrary(restorePanel = true) {
   libraryOverlay.classList.add('hidden');
   libraryBtn.classList.remove('on');
-});
+  document.body.classList.remove('library-open');
+  if (libraryOpenedPanel) {
+    libraryOpenedPanel = false;
+    // The panel was opened just for the library and there is nothing else
+    // to show in it -> put things back the way they were.
+    if (restorePanel && !state.explains.roots.length) hideExplainPanel();
+  }
+}
+libraryClose.addEventListener('click', () => closeLibrary());
 
 async function renderLibrary() {
   libraryBody.innerHTML = '<div class="lib-empty">Loading…</div>';
@@ -1737,8 +1760,7 @@ async function renderLibrary() {
 libraryBody.addEventListener('click', async (e) => {
   const open = e.target.closest('.lib-open');
   if (open) {
-    libraryOverlay.classList.add('hidden');
-    libraryBtn.classList.remove('on');
+    closeLibrary(); // restore the panel if the library opened it
     await selectConversation(open.dataset.conv);
     return;
   }
@@ -2186,10 +2208,7 @@ function setSummaryOverlay(open) {
   summaryOverlay.classList.toggle('hidden', !open);
   document.body.classList.toggle('summary-open', open);
   summaryBtn.classList.toggle('on', open);
-  if (open) {
-    libraryOverlay.classList.add('hidden');
-    libraryBtn.classList.remove('on');
-  }
+  if (open) closeLibrary(false); // only one overlay at a time
 }
 
 summaryBtn.addEventListener('click', () => {
@@ -2215,8 +2234,7 @@ summaryRefresh.addEventListener('click', () => {
 
 settingsBtn.addEventListener('click', () => {
   setSummaryOverlay(false); // only one overlay at a time
-  libraryOverlay.classList.add('hidden');
-  libraryBtn.classList.remove('on');
+  closeLibrary(false);
   const panelHidden = !state.sidebar.open;
   settingsOverlay.classList.remove('hidden');
   if (panelHidden) showSidebar();

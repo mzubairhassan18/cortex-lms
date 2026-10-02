@@ -255,10 +255,15 @@ body.compact-header #model-select {
 .msg { display: flex; min-width: 0; }
 .msg.user { justify-content: flex-end; }
 
-/* Assistant responses: Learning Bot icon at the top-left edge */
-.msg.assistant { align-items: flex-start; gap: 8px; }
+/* Assistant responses: Learning Bot icon sits ABOVE the response */
+.msg.assistant {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
 .msg-avatar {
   flex: none;
+  align-self: flex-start; /* keep the 26px badge in the column layout */
   width: 26px;
   height: 26px;
   border-radius: 7px;
@@ -266,7 +271,6 @@ body.compact-header #model-select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-top: 4px;
 }
 .msg-avatar svg { width: 17px; height: 17px; display: block; }
 .msg-body { min-width: 0; }
@@ -303,6 +307,10 @@ body.compact-header #model-select {
   background: var(--assistant-bubble);
   border: 1px solid var(--border);
   border-bottom-left-radius: 4px;
+  width: fit-content;
+  /* Good minimum so short replies ("OK") read like a proper card
+   * instead of collapsing into a narrow sliver. */
+  min-width: 240px;
 }
 
 .bubble.thinking::after {
@@ -563,6 +571,8 @@ body.compact-header #model-select {
 
 /* While the Summary overlay is open, the explainer tabs above it are hidden */
 body.summary-open #explain-tabs { display: none; }
+/* Same for the Library overlay */
+body.library-open #explain-tabs { display: none; }
 #explains-count {
   background: rgba(137, 180, 250, 0.25);
   border-radius: 999px;
