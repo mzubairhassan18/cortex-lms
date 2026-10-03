@@ -1,15 +1,19 @@
-# Learning Bot
+# Cortex
 
-An AI learning chat: ask questions, explain any message in a sidebar panel, keep
-personal notes, generate a summary of the session, and test yourself with a
-generated quiz. Attach Word/PDF/text files or links and they become part of the
-conversation's context.
+An AI learning workspace: ask questions, explain any message in a panel beside
+it, keep personal notes, generate a summary of the session, and test yourself
+with a generated quiz. Attach Word/PDF/text files or links and they become part
+of the conversation's context. A second, n8n-style **graph view** lays the whole
+topic out as a tree of conversations and explanations.
+
+- `/` — the public landing page
+- `/app` — the application
 
 ## Quick start
 
 ```bash
 npm install
-npm start          # http://localhost:3000
+npm start          # landing: http://localhost:3000  |  app: http://localhost:3000/app
 ```
 
 Requires Node.js (no build step — see [Architecture](#architecture)).
@@ -106,7 +110,7 @@ a Node host — any VPS, Fly.io, Railway, Render, a Docker container, etc. It is
 `npm start` logs the resolved configuration on boot:
 
 ```
-🎓 Learning Bot running at http://localhost:3000
+🧠 Cortex running at http://localhost:3000  (landing at /, app at /app)
    Provider: Auto (pick a working model) (auto) —
    OLLAMA_ENABLED=0 — local Ollama is not probed or offered.
 ```

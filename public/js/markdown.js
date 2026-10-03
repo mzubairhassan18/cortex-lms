@@ -127,10 +127,10 @@ export function renderMarkdown(src) {
   return out;
 }
 
-/* Learning Bot badge shown at the top-left edge of assistant responses. */
-/* The exact mark from the app header ("🎓 Learning Bot") — shown above
+/* Cortex badge shown at the top-left edge of assistant responses. */
+/* The exact mark from the app header ("🧠 Cortex") — shown above
  * each response as-is, no badge background. */
-export const AVATAR_MARK = '🎓';
+export const AVATAR_MARK = '🧠';
 
 /* One message as a Preact vnode. Text/markdown is inserted the same way as
  * before — the body goes through renderMarkdown() (which escapes the source)
@@ -144,7 +144,7 @@ export function messageVNode(m, i, scope) {
   ></div>`;
   if (isUser) return html`<div class="msg user">${bubble}</div>`;
   return html`<div class="msg assistant">
-    <span class="msg-avatar" title="Learning Bot">${AVATAR_MARK}</span>
+    <span class="msg-avatar" title="Cortex">${AVATAR_MARK}</span>
     <div class="msg-body">
       ${bubble}
       <button

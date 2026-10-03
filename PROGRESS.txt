@@ -1,5 +1,5 @@
-PROGRESS — Learning Bot v2
-==========================
+PROGRESS — Cortex v2
+=====================
 Companion to PLAN.md. READ PLAN.md FIRST if you have lost context.
 Update this file every time a item is checked off. Never delete a line —
 mark it, date it, and add a NOTE.
@@ -29,6 +29,9 @@ BASELINE
 
 P1 — UI  (graph view, themes, landing page)
 -------------------------------------------
+STATUS 2026-10-03: P1 COMPLETE (P1.1–P1.16 all [x]). Remaining work is all
+                   P2 (identity) — see PLAN.md §6. Commits: 7da4c0c (graph),
+                   716e0c4 (themes/texture/zoom/pan), next (landing + Cortex).
 [x] P1.1  2026-10-03 Header view toggle: list <-> graph, persists in
            localStorage['lb.view']. Button flips 🗺 Graph / 📋 List.
 [x] P1.2  2026-10-03 Tree layout — NOT a separate graph/layout.js: layout lives
@@ -86,7 +89,25 @@ P1 — UI  (graph view, themes, landing page)
            <html data-theme> before paint (no flash); js/theme.js owns the
            switch (manual choice -> localStorage['lb.theme'], else follow OS).
            Switch: #theme-toggle pill in the header.
-[ ] P1.16 Landing page at "/" (marketing copy, see research note above)
+[x] P1.16 2026-10-03 Landing page at "/" — public/landing.html + landing.css.
+           PRODUCT RENAMED: "Learning Bot" -> "Cortex" (user's pick, 2026-10-03).
+           The name covers the concept: notes + branching explains (no long top
+           scrolls), free LLM APIs, persistence/memory and quizzes — one brain
+           that grows. Applied to: landing, app header (🧠 Cortex), tab titles,
+           assistant avatar (markdown.js AVATAR_MARK), stream.js title, server
+           log, README, package.json, favicon (redrawn as a brain glyph).
+           ROUTING (user's pick): "/" = landing, "/app" = the app. Static is
+           served with index:false so "/" is free; /app/ redirects to /app.
+           Every asset URL in index.html made ABSOLUTE — relative paths broke
+           as soon as the document was served from /app.
+           Copy follows the research principles in PLAN.md §5: Fletch 6-tuple
+           hero, PAS spine, benefits paired with features, second person, and
+           product-truth proof only (explicitly no testimonials or user counts
+           — it is a new product). CTAs point at /app.
+           Landing is standalone (own token block, no app CSS) but reads the
+           same lb.theme key, so / -> /app never flashes a different scheme.
+           Verified: both routes, both themes, 0 failed requests, 0 warnings,
+           and a full-page screenshot of each theme.
 [x] P1.17 2026-10-03 Graph canvas controls (added at user request):
              zoom in/out — rail buttons (−, 100%, ＋), keys +/−/0,
                        Ctrl/Cmd+wheel anchored at the cursor. 30%–250%,

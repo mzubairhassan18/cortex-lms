@@ -144,7 +144,18 @@ const FIRST_BYTE_MS = Number(process.env.FIRST_BYTE_MS) || 120000;
 const IDLE_MS = Number(process.env.IDLE_MS) || 45000;
 
 app.use(express.json({ limit: '16mb' })); // room for uploaded files (base64)
-app.use(express.static(path.join(__dirname, 'public')));
+// index:false so "/" can be the marketing landing page instead of the app.
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+
+/* Route map (auth gates arrive in P2 and wrap /app):
+ *   /      -> public landing page
+ *   /app   -> the application itself
+ * Every asset URL inside index.html is absolute, so serving it from /app
+ * resolves exactly as it did from /.
+ */
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'landing.html')));
+app.get('/app', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/app/', (req, res) => res.redirect(302, '/app'));
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(CONV_FILE)) fs.writeFileSync(CONV_FILE, '[]');
@@ -1146,7 +1157,7 @@ app.post('/api/chat', async (req, res) => {
 
 app.listen(PORT, () => {
   const { s, p, base } = providerConf();
-  console.log(`🎓 Learning Bot running at http://localhost:${PORT}`);
+  console.log(`🧠 Cortex running at http://localhost:${PORT}  (landing at /, app at /app)`);
   console.log(`   Provider: ${p.label} (${s.provider}) — ${base}`);
   if (!OLLAMA_ENABLED) console.log('   OLLAMA_ENABLED=0 — local Ollama is not probed or offered.');
 });

@@ -1,4 +1,4 @@
-# PLAN — Learning Bot v2 (graph UI + auth + workspaces + themes + landing)
+# PLAN — Cortex v2 (graph UI + auth + workspaces + themes + landing)
 
 > **READ THIS FIRST, EVERY SESSION.** This is the source of truth for the big
 > change. Keep `PROGRESS.txt` in sync. When context is lost, come back here.
@@ -246,7 +246,15 @@ is unaffected either way.
 
 ---
 
-## 5. G4 — Landing page
+## 5. G4 — Landing page — **IMPLEMENTED 2026-10-03**
+
+Shipped as `public/landing.html` + `public/landing.css`, served at `/`.
+
+**Naming (decided with the user, 2026-10-03): the product is *Cortex*** —
+the brain's outer layer where memory and learning live. Short, and it names
+the "one brain that keeps growing" idea directly. Applied everywhere: landing,
+app header (`🧠 Cortex`), tab titles, assistant avatar, server log, README,
+`package.json`, and the favicon (redrawn as a two-hemisphere brain glyph).
 
 Research done (see PROGRESS entry). Applied principles:
 
@@ -264,6 +272,38 @@ Research done (see PROGRESS entry). Applied principles:
 
 Route: `/` (public landing) → `/login` → `/workspaces` → `/app`.
 
+### 5.1 Routing — **split done now, auth gate comes in P2**
+
+`server.js` serves static files with `index: false` so `/` is free for the
+landing page:
+
+```
+/     -> public/landing.html   (public)
+/app  -> public/index.html     (the application; /app/ redirects here)
+```
+
+**Consequence:** every asset URL inside `index.html` had to become absolute
+(`/style.css`, `/graph.css`, `/icon.svg`, `/vendor/...`, `/js/main.js`) —
+from `/` they worked as relative paths, from `/app` they only work absolute.
+Verified: `/app` loads with **0 failed requests**.
+
+The landing page is deliberately **standalone** — its own token block, no app
+CSS — so it renders before and without the app shell. It reads the same
+`lb.theme` key as the app, so clicking through never flashes a different
+scheme (verified: light-visit → `/app` → still light).
+
+### 5.2 Acceptance — **all met**
+
+- [x] Hero answers the Fletch 6-tuple in <10 s of reading
+- [x] PAS spine: Problem ("a scroll of forgetting") → Agitation → Solution
+- [x] Every feature card pairs a benefit with the concrete feature
+- [x] Proof is *product-truth* only — six checkable claims, plus an explicit
+      line saying there are no testimonials or user counts because it's new
+- [x] No invented user numbers, quotes, logos or "free forever" we can't back
+- [x] Second person, short lines, one idea per line
+- [x] CTAs all point at `/app`; nav anchors scroll to real sections
+- [x] Works in both themes, no flash on load, 0 console warnings
+
 ---
 
 ## 6. Phases
@@ -276,18 +316,18 @@ Route: `/` (public landing) → `/login` → `/workspaces` → `/app`.
 5. [x] Collapse-on-scroll
 6. [x] Themes (light/dark) + textured background
 7. [x] Graph canvas controls: zoom in/out + drag-to-pan *(added at user request)*
-8. [ ] Landing page
+8. [x] Landing page
 
 **P2 — Identity**
-8. Auth (signup/login)
-9. Workspaces (cards → app)
-10. User/workspace scoping on every route
-11. BYOK (per-user provider + key, stored server-side)
-12. Migrate existing local data *(pending Q6)*
+9. Auth (signup/login) — gate in front of `/app`
+10. Workspaces (cards → app)
+11. User/workspace scoping on every route
+12. BYOK (per-user provider + key, stored server-side)
+13. Migrate existing local data *(pending Q6)*
 
 **P3 — Ship**
-13. Host it free *(pending Q4/Q5)*
-14. Domain/URL, final smoke test
+14. Host it free *(pending Q4/Q5)*
+15. Domain/URL, final smoke test
 
 ---
 

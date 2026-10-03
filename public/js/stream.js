@@ -50,7 +50,7 @@ export function makeStreamer(container, onFinish) {
       el.className = 'msg assistant msg-streaming';
       const av = document.createElement('span');
       av.className = 'msg-avatar';
-      av.title = 'Learning Bot';
+      av.title = 'Cortex';
       av.innerHTML = AVATAR_MARK;
       el.appendChild(av);
       const body = document.createElement('div');

@@ -1,7 +1,7 @@
 {
-  "name": "learning-bot",
+  "name": "cortex",
   "version": "1.0.0",
-  "description": "AI learning chat with explain-in-sidebar, powered by Ollama",
+  "description": "Cortex — an AI learning workspace: chat, explain-in-panel, notes, summaries and quizzes",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

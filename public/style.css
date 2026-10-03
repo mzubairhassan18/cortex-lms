@@ -347,7 +347,7 @@ body.compact-header #model-select {
 .msg { display: flex; min-width: 0; }
 .msg.user { justify-content: flex-end; }
 
-/* Assistant responses: Learning Bot icon sits ABOVE the response */
+/* Assistant responses: the Cortex icon sits ABOVE the response */
 .msg.assistant {
   flex-direction: column;
   align-items: stretch;
@@ -959,7 +959,7 @@ body.library-open #explain-tabs { display: none; }
 /*
  * Collapsed pane: a thin line; click to expand. The old gradient is gone —
  * while the panel is loading (pane flagged collapsed but still wide) this
- * shows the Learning Bot mark enlarged instead; it scales down with the pane,
+ * shows the Cortex mark enlarged instead; it scales down with the pane,
  * so a real few-pixel line stays a clean line.
  */
 .ex-pane.collapsed {
@@ -981,7 +981,7 @@ body.library-open #explain-tabs { display: none; }
 .ex-pane.collapsed > * { display: none !important; }
 
 /* Main conversation collapsed to a few pixels (explainer gets the space).
-   Same treatment as panes: the loading flash shows the Learning Bot mark,
+   Same treatment as panes: the loading flash shows the Cortex mark,
    the edge line is flat — no gradient. */
 #chat-area { position: relative; }
 #chat-area.collapsed { cursor: e-resize; }
