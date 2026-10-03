@@ -246,6 +246,79 @@ are deliberately left alone — they are messages, not controls.
 The theme switch now shows a **sun on dark / moon on light** instead of always
 a moon, and the chat avatar matches the header's node-graph mark.
 
+### 2.6 Navigation, centering and the empty workspace — **IMPLEMENTED 2026-10-04**
+
+Four review requests: getting to a workspace from anywhere, making the explain
+tree use the space above it, and what the graph does when a workspace is empty.
+
+**a) List view can reach workspaces**
+
+The zoomed-out canvas only exists in graph view, so from the list there was no
+way in at all — you had to switch views, zoom out, then come back. A switcher
+chip now sits at the top of `#left-sidebar`, above the conversation list:
+current workspace name + chevron. Clicking it opens a dropdown of every
+workspace with its conversation count, the current one marked, plus **New
+workspace** — which swaps itself for the same inline name input the cards use.
+One `switchWorkspace()` / `createWorkspace()`, no second code path.
+
+**b) Explanations use the space ABOVE them**
+
+`layout()` used to stack children downwards and only then pull the parent down
+to the midpoint, so a whole branch hung below its parent no matter what. The
+rule is now **a parent is centred on its children, at every level**: the middle
+of three siblings lands level with its parent, the first sits above it, the last
+below. Two things make that safe:
+
+- `extent(id)` answers *"how far above and below its own top edge does this
+  branch reach?"* from the tree and the fixed `DIM` sizes alone — memoised per
+  layout, asked **before** anything is placed. A sibling reserves the upward
+  half of the next branch before it is placed, so a centred branch can never
+  walk through the one above it. Without that reservation centring is simply
+  not possible; the old downward stack was the symptom, not the design.
+- the forest is then centred on the current conversation, and if that takes
+  anything above `y = 0` the **whole board slides down** instead of clipping —
+  everything is positioned relative to everything else, so it is a pure
+  translation.
+
+Verified: conversation centre **394**, forest centre **394**, `minY = 0`,
+band-reserve exact (next conversation `810` = forest bottom `784` + 26). The
+nesting rule holds too: a 500px explain centred on its 104px child sitting at
+`202..306` inside `4..504`.
+
+**c) An empty workspace is one button**
+
+`#chat-area` has nowhere to move when there are no conversations, so it stayed
+a flex child of `#main-row` and ate half the screen — which is exactly why
+zooming out crammed the workspace cards into the right-hand half of the window.
+`body.graph-mode #main-row > #chat-area` now hides it whenever it is still
+unhosted, so the canvas takes the window. The `+` nodes are suppressed too:
+with no conversation there is nothing to add around, and two of them at the
+top-left of a blank board read as duplicates.
+
+The state gets its own control. `#graph-empty` moved **out** of
+`#graph-canvas` — inside it the zoom scaled it down to 30% — and now renders
+one large plus button and a line of guidance, centred over the board. It stands
+in for the composer, which is deliberately absent: there is nothing to attach to
+and nothing to send to. Clicking it runs `createConversation()` through the same
+handler as the `+` node, so both paths create, select and repaint identically.
+
+Verified end to end: empty workspace → full-width canvas, one button, no
+composer; click → conversation created, node appears, `chat-area` moves into
+`.gn-host`, empty state hides.
+
+**d) Zooming out takes the window over**
+
+Past `ZOOM_WS` a `ws-zoomed` class lands on `<body>` and hides the top toolbar,
+both sidebars, the splitter and any unhosted chat area, so the workspace cards
+own the screen. The zoom rail stays (`z-index: 40`) because it is the way back
+in. Removed on the way down, so nothing is left hidden once you dive back.
+
+**e) No sidebar toggle in graph view**
+
+`body.graph-mode #left-toggle` joins `#left-sidebar` in `display: none`. That
+button only ever opened the list-view conversation list — precisely the layout
+graph view replaced.
+
 ---
 
 ## 3. G5–G8 — Auth, workspaces, per-user data, BYOK

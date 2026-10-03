@@ -185,6 +185,99 @@ button > .ico:only-child { display: block; margin: 0 auto; }
 
 .logo { font-weight: 700; font-size: 16px; }
 
+/* ------------------------- workspace switcher -------------------------
+   The list-view route into workspaces: in graph view you zoom past 50%
+   instead, but from the list there was no way in at all. */
+
+#ws-switch-wrap { position: relative; margin: 10px 12px 0; }
+
+#ws-switch {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+#ws-switch:hover,
+#ws-switch[aria-expanded='true'] { border-color: var(--accent); }
+#ws-switch-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#ws-switch .ico { flex: none; font-size: 14px; color: var(--text-dim); }
+
+#ws-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 70;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 14px 34px var(--shadow-md);
+  padding: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+#ws-menu.hidden { display: none; }
+
+.ws-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  background: none;
+  border: none;
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+.ws-menu-item:hover { background: var(--bg-alt); }
+.ws-menu-item.active { color: var(--accent); font-weight: 600; }
+.ws-menu-item.create { color: var(--accent); }
+.ws-menu-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-menu-count {
+  flex: none;
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--count-bg);
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+}
+.ws-menu-sep { height: 1px; background: var(--border); margin: 6px 4px; }
+.ws-menu-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 9px;
+  background: var(--bg-alt);
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 13px;
+}
+
 #new-chat-btn {
   margin: 12px;
   padding: 10px;

@@ -145,12 +145,16 @@ function restoreAll() {
 
 function build() {
   const col0 = [];
+  const hasConv = state.conversations.length > 0;
   if (!summaryOverlay.classList.contains('hidden')) col0.push({ key: 'summary', kind: 'summary' });
-  col0.push({ key: 'add:top', kind: 'add' });
+  /* With no conversation there is nothing to add around: the empty state
+   * carries its own single + button, and two stray boxes at the top-left of
+   * an otherwise blank board just read as duplicates. */
+  if (hasConv) col0.push({ key: 'add:top', kind: 'add' });
   for (const c of state.conversations) {
     col0.push({ key: 'c:' + c.id, kind: 'conv', id: c.id, data: c });
   }
-  col0.push({ key: 'add:bottom', kind: 'add' });
+  if (hasConv) col0.push({ key: 'add:bottom', kind: 'add' });
 
   const idx = childrenIndex();
   const exps = [];
@@ -178,9 +182,16 @@ function sizeOf(n) {
 
 /*
  * Column 0 is a plain vertical stack (summary, +, conversations, +).
- * Every explanation is a tree hanging off column 0, laid out so a parent sits
- * centred on its children: leaves are placed top-down, parents fill in
- * afterwards at the midpoint of the span their subtree occupies.
+ * The explanations hang off it as a tree, and the rule is simple: a parent is
+ * centred on its children, so a branch grows UPWARD as well as downward — the
+ * middle of three siblings lands level with its parent instead of the whole
+ * stack being pushed below it. The rule applies at every level, so the
+ * hierarchy stays smooth all the way down.
+ *
+ * Centring is only safe if each sibling reserves the upward half of the next
+ * one BEFORE it is placed, otherwise a centred branch walks straight through
+ * the branch above it. That is what `extent()` answers — from the tree alone,
+ * and before any position exists.
  */
 function layout(model) {
   const pos = new Map();
@@ -207,50 +218,118 @@ function layout(model) {
     x += (colW.get(d) || DIM.explain.w) + GAP_X;
   }
 
-  /* Anchor the forest to the current conversation's node so the arrows read as
-   * "this conversation, then its explanations". Every root forest starts at
-   * least that far down, and each one continues below the last. */
-  const cur = pos.get('c:' + state.currentId);
-  const minY = cur ? cur.y : 0;
-  let cursor = minY;
-  let forestBottom = minY;   // lowest edge any explanation reached
-
-  const place = (id, depth) => {
-    const key = 'e:' + id;
+  /*
+   * Vertical reach of a branch relative to the TOP EDGE OF ITS OWN ROOT:
+   * `hi` climbs (0 or negative), `lo` falls. Only the tree and the fixed DIM
+   * sizes feed it, so it is memoised per layout and asked before placement.
+   */
+  const extMemo = new Map();
+  const extent = (id) => {
+    const hit = extMemo.get(id);
+    if (hit) return hit;
     const s = sizeOf({ kind: 'explain', id });
     const kids = model.idx.get(id) || [];
     if (!kids.length) {
-      pos.set(key, { x: depthX.get(depth), y: cursor, w: s.w, h: s.h });
-      return { top: cursor, bottom: cursor + s.h };
+      const leaf = { hi: 0, lo: s.h };
+      extMemo.set(id, leaf);
+      return leaf;
     }
-    // Leave the parent's top half in the slot above its children.
-    let next = cursor + Math.ceil(s.h / 2);
-    let top = Infinity;
-    let bottom = -Infinity;
+    let next = 0;
+    let gBot = s.h;              // the node itself is part of its own branch
     for (const k of kids) {
-      const r = placeAt(k.id, depth + 1, next);
-      next = r.bottom + GAP_Y;
-      if (r.top < top) top = r.top;
-      if (r.bottom > bottom) bottom = r.bottom;
+      const e = extent(k.id);
+      const at = next - e.hi;    // leave the upward half its room
+      if (at + e.lo > gBot) gBot = at + e.lo;
+      next = at + e.lo + GAP_Y;
     }
-    const myTop = Math.max(cursor, (top + bottom) / 2 - s.h / 2);
-    pos.set(key, { x: depthX.get(depth), y: myTop, w: s.w, h: s.h });
-    return { top: Math.min(top, myTop), bottom: Math.max(bottom, myTop + s.h) };
+    const mid = Math.round(s.h / 2 - gBot / 2);
+    const e = { hi: Math.min(0, mid), lo: Math.max(s.h, gBot + mid) };
+    extMemo.set(id, e);
+    return e;
   };
 
-  const placeAt = (id, depth, at) => {
-    const save = cursor;
-    cursor = at;
-    const r = place(id, depth);
-    cursor = save;
-    return r;
+  /*
+   * `at` is where this node's top edge goes. Its children stack from that
+   * same edge, then the whole stack slides until it is centred on the parent —
+   * `keys` comes back so the slide can reach every descendant at once.
+   */
+  const place = (id, depth, at) => {
+    const key = 'e:' + id;
+    const s = sizeOf({ kind: 'explain', id });
+    const kids = model.idx.get(id) || [];
+    pos.set(key, { x: depthX.get(depth), y: at, w: s.w, h: s.h });
+    const keys = [key];
+    if (!kids.length) return { top: at, bottom: at + s.h, keys };
+
+    let next = at;
+    let kidTop = Infinity;
+    let kidBot = -Infinity;
+    for (const k of kids) {
+      const e = extent(k.id);
+      const r = place(k.id, depth + 1, next - e.hi);
+      keys.push(...r.keys);
+      if (r.top < kidTop) kidTop = r.top;
+      if (r.bottom > kidBot) kidBot = r.bottom;
+      next = r.bottom + GAP_Y;
+    }
+    const delta = Math.round(s.h / 2 - (kidBot - at) / 2);
+    if (delta) {
+      for (let i = 1; i < keys.length; i++) pos.get(keys[i]).y += delta;
+      kidTop += delta;
+      kidBot += delta;
+    }
+    return {
+      top: Math.min(at, kidTop),
+      bottom: Math.max(at + s.h, kidBot),
+      keys,
+    };
   };
+
+  /* Anchor the forest to the current conversation so the arrows read as
+   * "this conversation, then its explanations". Each root reserves the upward
+   * half of its branch, so one forest never climbs into the one above. */
+  const cur = pos.get('c:' + state.currentId);
+  const minY = cur ? cur.y : 0;
+  let cursor = minY;
+  let forestTop = Infinity;
+  let forestBottom = -Infinity;
 
   for (const r of model.roots) {
-    cursor = Math.max(cursor, minY);
-    const sub = place(r, 1);
+    const e = extent(r);
+    const sub = place(r, 1, cursor - e.hi);
+    if (sub.top < forestTop) forestTop = sub.top;
     if (sub.bottom > forestBottom) forestBottom = sub.bottom;
     cursor = sub.bottom + GAP_Y * 1.4;
+  }
+
+  /*
+   * The stack was laid out from the conversation's top edge, which puts the
+   * WHOLE forest below it. Centre it instead: the middle sibling lands level
+   * with the conversation, the first above it, the last below. Explains live
+   * in columns to the right of column 0, so reaching upward costs nothing —
+   * no conversation, summary or + box is anywhere near those columns.
+   */
+  if (cur && forestBottom > forestTop) {
+    const delta = Math.round(cur.y + cur.h / 2 - (forestTop + forestBottom) / 2);
+    if (delta) {
+      for (const n of model.exps) pos.get(n.key).y += delta;
+      forestTop += delta;
+      forestBottom += delta;
+    }
+  }
+
+  /*
+   * Centring a tall branch on a short conversation walks it off the top of
+   * the canvas, and the canvas has a fixed box — anything at a negative y is
+   * simply not reachable. Slide the WHOLE board down instead: everything is
+   * positioned relative to everything else, so this is a pure translation.
+   */
+  let lift = 0;
+  for (const p of pos.values()) if (p.y < lift) lift = p.y;
+  if (lift < 0) {
+    for (const p of pos.values()) p.y -= lift;
+    y -= lift;
+    forestBottom -= lift;
   }
 
   /*
@@ -957,6 +1036,11 @@ export function initGraph() {
   railZoomIn && railZoomIn.addEventListener('click', () => setZoom(zoom * ZOOM_RATIO));
   railZoomOut && railZoomOut.addEventListener('click', () => setZoom(zoom / ZOOM_RATIO));
   railZoomLabel && railZoomLabel.addEventListener('click', () => setZoom(1));
+  /* Empty workspace: there is no input row to type into (no conversation to
+   * send to), so the whole job of starting one falls to this single button.
+   * It goes through the same handler as the + node so both paths behave
+   * identically — create, select, and the canvas repaints itself. */
+  $('graph-empty-add').addEventListener('click', () => newChatBtn.click());
   /* Published so the workspace layer can jump back to 100% after you pick a
    * workspace — it must not import this module (graph.js is a leaf). */
   state.zoomTo = (z) => setZoom(z);

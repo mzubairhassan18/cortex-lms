@@ -43,6 +43,7 @@ export async function loadWorkspaces() {
       localStorage.setItem('lb.workspace', state.workspaceId);
     } catch { /* private mode */ }
   }
+  renderSwitcher();
   return state.workspaces;
 }
 
@@ -78,6 +79,7 @@ export async function switchWorkspace(id) {
 
   if (state.zoomTo) state.zoomTo(1);
   setVisible(false);
+  renderSwitcher();
 }
 
 export async function createWorkspace(name) {
@@ -143,6 +145,10 @@ function setVisible(on) {
   if (on === visible || !layer) return;
   visible = on;
   layer.classList.toggle('hidden', !on);
+  /* The body class is what takes the window over (see graph.css): with the
+   * toolbar and rails hidden the cards own the screen. Removed on the way
+   * back in, so nothing is left hidden once you dive back down. */
+  document.body.classList.toggle('ws-zoomed', on);
   if (on) {
     editing = null;
     renderLayer();
@@ -228,11 +234,13 @@ async function commitName(key, value) {
   editing = null;
   if (!name) {
     renderLayer();
+    renderSwitcher();
     return;
   }
   if (key === 'new') await createWorkspace(name);
   else await renameWorkspace(key, name);
   renderLayer();
+  renderSwitcher();
 }
 
 function onClick(e) {
@@ -271,10 +279,122 @@ function onKeydown(e) {
   if (inp) commitName(inp.dataset.wsInput, inp.value);
 }
 
+/* ================= list-view switcher =================
+ *
+ * The zoomed-out canvas is only reachable from graph view, which would leave
+ * list view with no way into a workspace at all. This chip is that way in —
+ * same data, same switchWorkspace(), one click from the sidebar.
+ */
+
+let switcher = null; // #ws-switch
+let menu = null;     // #ws-menu
+
+function renderSwitcher() {
+  const label = document.getElementById('ws-switch-name');
+  if (label) {
+    const cur = state.workspaces.find((w) => w.id === state.workspaceId);
+    label.textContent = cur ? cur.name : 'Workspaces';
+  }
+  // Keep an open menu honest about counts and which entry is current.
+  if (menu && !menu.classList.contains('hidden')) renderSwitchMenu();
+}
+
+function renderSwitchMenu() {
+  if (!menu) return;
+  render(
+    html`<${Fragment}>
+      ${state.workspaces.map(
+        (w) => html`<button
+          type="button"
+          role="menuitem"
+          class=${'ws-menu-item' + (w.id === state.workspaceId ? ' active' : '')}
+          data-ws-open=${w.id}
+        >
+          <span class="ws-menu-name">${w.name}</span>
+          <span class="ws-menu-count">${w.conversationCount || 0}</span>
+        </button>`
+      )}
+      <div class="ws-menu-sep" role="separator"></div>
+      ${editing === 'new'
+        ? html`<input
+            class="ws-menu-input"
+            data-ws-input="new"
+            placeholder="Workspace name"
+            spellcheck="false"
+          />`
+        : html`<button type="button" role="menuitem" class="ws-menu-item create" data-ws-create>
+            <svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg>
+            <span class="ws-menu-name">New workspace</span>
+          </button>`}
+    <//>`,
+    menu
+  );
+}
+
+function setMenuOpen(on) {
+  if (!menu || !switcher) return;
+  menu.classList.toggle('hidden', !on);
+  switcher.setAttribute('aria-expanded', on ? 'true' : 'false');
+  if (on) {
+    editing = null;
+    renderSwitchMenu();
+  }
+}
+
+function initSwitcher() {
+  switcher = document.getElementById('ws-switch');
+  menu = document.getElementById('ws-menu');
+  if (!switcher || !menu) return;
+
+  switcher.addEventListener('click', (e) => {
+    e.stopPropagation(); // a click on the chip must not immediately close it
+    setMenuOpen(menu.classList.contains('hidden'));
+  });
+
+  menu.addEventListener('click', (e) => {
+    const open = e.target.closest('[data-ws-open]');
+    if (open) {
+      const id = open.dataset.wsOpen;
+      setMenuOpen(false);
+      switchWorkspace(id);
+      return;
+    }
+    if (e.target.closest('[data-ws-create]')) {
+      editing = 'new';
+      renderSwitchMenu();
+      const inp = menu.querySelector('[data-ws-input]');
+      if (inp) inp.focus();
+    }
+  });
+
+  menu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      editing = null;
+      setMenuOpen(false);
+      switcher.focus();
+      return;
+    }
+    if (e.key !== 'Enter') return;
+    const inp = e.target.closest('[data-ws-input]');
+    if (!inp) return;
+    const value = inp.value;
+    editing = null;
+    setMenuOpen(false);
+    commitName('new', value);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (menu.classList.contains('hidden')) return;
+    if (e.target.closest('#ws-switch-wrap')) return;
+    setMenuOpen(false);
+  });
+}
+
 /* ================= wiring ================= */
 
 export async function initWorkspaces() {
   layer = $('ws-layer');
+  initSwitcher();
   // Always reconcile, even if the layer element is missing — every conversation
   // list load reads state.workspaceId.
   await loadWorkspaces();

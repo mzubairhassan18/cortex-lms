@@ -210,6 +210,55 @@ See PLAN.md 2.5 for the full write-up.
            NOTE: screenshots from browser.screenshot came back stale twice (a
            frame behind the DOM). A visible repaint probe or a fresh capture
            confirms; trust getComputedStyle over the first image.
+[x] P1.22 2026-10-04 Workspace switcher in the sidebar — the list-view route
+           into workspaces (the zoomed-out canvas only exists in graph view,
+           so from the list there was no way in). #ws-switch chip above
+           #conversation-list: name + chevron, click opens #ws-menu with every
+           workspace + its conversation count, current one marked, and New
+           workspace (which swaps itself for the inline name input). Reuses
+           switchWorkspace()/createWorkspace() — no second code path.
+           Verified: menu opens at 225x120 over the list, 3 items, counts
+           7/0, active state correct, Escape/outside-click close.
+[x] P1.23 2026-10-04 Explanations centred on their parents, recursively.
+           layout() reworked: children stack from the parent's top edge then
+           the whole stack slides so it is centred on the parent — the middle
+           sibling lands level with its parent instead of everything being
+           pushed below it. extent(id) memoises how far a branch reaches above
+           and below its own root from the tree ALONE, so a sibling can reserve
+           the upward half of the next branch before it is placed (without that
+           a centred branch walks straight through the one above it). The whole
+           forest is then centred on the current conversation, and if that
+           takes anything above y=0 the entire board slides down rather than
+           clipping. Verified: conversation centre 394 == forest centre 394,
+           minY 0, next conversation 810 = forest bottom 784 + GAP_Y 26;
+           nested case — 500px explain at 4..504 centred on its 104px child at
+           202..306. Sibling gaps preserved (36/36), 0 overlaps.
+[x] P1.24 2026-10-04 Empty workspace is one button.
+           (i) body.graph-mode #main-row > #chat-area — #chat-area is moved
+           into a node, so if it is STILL a direct child of #main-row there is
+           no node to host it and it was stealing half the screen (that is why
+           zooming out crammed the workspace cards into the right half).
+           (ii) build() drops both + nodes when there are no conversations.
+           (iii) #graph-empty moved OUT of #graph-canvas (inside it the zoom
+           scaled it to 30%) and now renders one large plus + guidance,
+           centred, standing in for the composer — which is deliberately
+           absent: nothing to attach to, nothing to send to. Click runs
+           createConversation() via the same handler as the + node.
+           Verified: empty ws -> full-width canvas, 1 button, chat display:none,
+           0 nodes; click -> conversation created (mussqpc468mis), 3 nodes,
+           chat moved into .gn-host, empty state hidden. Test conversation
+           deleted again; Physics lab back to 0.
+[x] P1.25 2026-10-04 Zoom-out takes the window over. body.ws-zoomed (toggled
+           from workspaces.js setVisible) hides #top-bar, #left-sidebar,
+           #left-toggle, #right-sidebar, #resize-handle and any unhosted
+           #chat-area; #graph-rail survives at z-index 40 as the way back in.
+           Verified at 48%: header/left/right all display:none, rail flex,
+           layer flex, cards readable; diving into a workspace restores all of
+           them and zooms to 100%.
+[x] P1.26 2026-10-04 No sidebar toggle in graph view. body.graph-mode
+           #left-toggle joins #left-sidebar in display:none — that button only
+           opens the list-view conversation list, which is the layout graph
+           view replaced. Verified: none in graph, block in list.
 
 P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
 ------------------------------------------------------

@@ -84,6 +84,18 @@
       <div class="left-header">
         <span class="logo"><svg class="ico" aria-hidden="true"><use href="#i-graph"></use></svg> Cortex</span>
       </div>
+      <!--
+        Workspace switcher — the ONLY way to reach workspaces from list view.
+        In graph view you zoom past 50% instead; this is that same action, one
+        click away, without leaving the list.
+      -->
+      <div id="ws-switch-wrap">
+        <button type="button" id="ws-switch" aria-haspopup="menu" aria-expanded="false" aria-controls="ws-menu" title="Switch workspace">
+          <span id="ws-switch-name">Workspaces</span>
+          <svg class="ico" aria-hidden="true"><use href="#i-chev-down"></use></svg>
+        </button>
+        <div id="ws-menu" class="hidden" role="menu"></div>
+      </div>
       <button id="new-chat-btn"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg> New Chat</button>
       <div id="conversation-list"></div>
       <!-- Static footer: active provider/model + settings entry -->
@@ -200,16 +212,27 @@
             <g id="graph-paths"></g>
           </svg>
           <div id="graph-nodes"></div>
-          <div id="graph-empty" class="hidden">
-            <b>Nothing here yet</b>
-            Start a chat — its explanations will branch off to the right.
-          </div>
         </div><!-- /#graph-canvas -->
       </div><!-- /#graph-zoomer -->
       </div><!-- /#graph-scroll -->
       <!-- Zoomed out past ~50%: the conversations give way to the workspaces
            that hold them. Lives outside #graph-scroll so it never scales. -->
       <div id="ws-layer" class="hidden" aria-label="Workspaces"></div>
+      <!--
+        Empty workspace. Lives OUTSIDE #graph-canvas on purpose: inside it this
+        would be scaled by the zoom like everything else, so at 30% it would be
+        unreadable. It also stands IN for the composer — with no conversation
+        there is nothing to attach to and nothing to send to, so the input row
+        is suppressed (see `body.graph-mode #main-row > #chat-area`) and one
+        plus button does the job instead.
+      -->
+      <div id="graph-empty" class="hidden">
+        <button type="button" id="graph-empty-add" title="Start the first conversation">
+          <svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg>
+        </button>
+        <b>Start your first conversation</b>
+        <span>Its explanations branch off to the right once you ask.</span>
+      </div>
       <div id="graph-rail">
         <button id="rail-zoom-out" title="Zoom out (−)"><svg class="ico" aria-hidden="true"><use href="#i-minus"></use></svg></button>
         <button id="rail-zoom-label" title="Reset zoom to 100% (0)">100%</button>

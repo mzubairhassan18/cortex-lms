@@ -17,9 +17,19 @@
 /* ------------------------- mode switches ------------------------- */
 
 /* In graph mode the left rail and the splitter are redundant: the
-   conversation list IS the column of nodes, and nothing is resizable. */
+   conversation list IS the column of nodes, and nothing is resizable.
+   The button that opens that list goes too — it would only ever show the
+   list-view layout over the top of a view that does not use it. */
 body.graph-mode #left-sidebar,
+body.graph-mode #left-toggle,
 body.graph-mode #resize-handle { display: none; }
+
+/* #chat-area is MOVED into the current conversation's node, so it is no
+   longer a child of #main-row. If it IS still a direct child here, there is
+   no node to host it — an empty workspace — and left where it is it would
+   sit beside the canvas and steal half the screen (which is how the workspace
+   cards ended up crammed into one corner when you zoomed out). */
+body.graph-mode #main-row > #chat-area { display: none; }
 
 /* The right sidebar holds the Library/Settings/Summary overlays. It must stay
    reachable, but it should float over the canvas instead of squeezing it. */
@@ -123,6 +133,17 @@ body.graph-mode .summary-node #summary-overlay {
   inset: 0;
   z-index: 1;
 }
+
+/* Zoomed out past ZOOM_WS the workspace cards take the WHOLE window: the top
+   toolbar is conversation furniture (Summary/Library/model) and has no business
+   sitting above a workspace picker, and the rails would only crowd it. The zoom
+   rail survives — it is the way back in. */
+body.ws-zoomed #top-bar,
+body.ws-zoomed #left-sidebar,
+body.ws-zoomed #left-toggle,
+body.ws-zoomed #right-sidebar,
+body.ws-zoomed #resize-handle,
+body.ws-zoomed #main-row > #chat-area { display: none; }
 
 /* Zoomed-out board: the conversations hand over to the workspaces holding
  * them. Sits above #graph-scroll but below #graph-rail (z-index 40), so the
@@ -447,22 +468,51 @@ body.graph-mode .ex-vdiv:has(+ .ex-pane.ex-child:empty) { display: none; }
 }
 .gnode.add-node:hover { color: var(--accent); border-color: var(--accent); }
 
-/* ------------------------- hint when empty ------------------------- */
+/* ------------------------- empty workspace ------------------------- */
 
+/* A direct child of #graph-view, NOT of #graph-canvas: inside the canvas the
+   zoom would scale it too, so at 30% it would be unreadable. Here it stays at
+   full size however far out you are, floating over the board. */
 #graph-empty {
   position: absolute;
   left: 50%;
-  top: 140px;
-  z-index: 2;
-  transform: translateX(-50%);
+  top: 50%;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   text-align: center;
   color: var(--text-dim);
   font-size: 13px;
-  max-width: 380px;
+  max-width: 400px;
   line-height: 1.6;
 }
 #graph-empty.hidden { display: none; }
-#graph-empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+#graph-empty b { display: block; color: var(--text); font-size: 15px; }
+
+/* The only control in an empty workspace. There is no conversation yet, so
+   there is no input row to show — this one button creates the first node. */
+#graph-empty-add {
+  width: 66px;
+  height: 66px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px dashed var(--border);
+  background: var(--bg-panel);
+  color: var(--accent);
+  font-size: 26px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px var(--shadow-md);
+  transition: transform 0.14s, border-color 0.14s, box-shadow 0.14s;
+}
+#graph-empty-add:hover {
+  transform: scale(1.06);
+  border-style: solid;
+  border-color: var(--accent);
+  box-shadow: 0 12px 30px var(--shadow-md);
+}
 
 /* Which layout am I in? */
 #view-toggle.on {
