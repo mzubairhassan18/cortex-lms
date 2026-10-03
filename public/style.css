@@ -267,6 +267,16 @@ button > .ico:only-child { display: block; margin: 0 auto; }
   text-align: center;
 }
 .ws-menu-sep { height: 1px; background: var(--border); margin: 6px 4px; }
+
+/* Navigates away to the standalone /workspaces page — an anchor, not a
+ * button, so it can still be opened in a new tab. */
+.ws-menu-item.all {
+  font-family: inherit;
+  text-decoration: none;
+  color: var(--text-dim);
+}
+.ws-menu-item.all .ico { flex: none; font-size: 14px; }
+.ws-menu-item.all:hover { color: var(--accent); }
 .ws-menu-input {
   width: 100%;
   box-sizing: border-box;
@@ -992,6 +1002,22 @@ body.library-open #explain-tabs { display: none; }
 }
 .ex-head .ex-btn:hover { background: var(--user-bubble); color: var(--text); }
 .ex-head .ex-btn.ex-close:hover { color: var(--danger); }
+
+/*
+ * Minimise — the visible twin of the bare "click the header" fold. The node's
+ * own chevron is display:none while an explanation is expanded (graph.css), so
+ * this is the only control reachable while you are actually reading one.
+ *
+ * On the graph board the NODE shrinks to its small size; in list view the
+ * container folds to just its header. The rules below are scoped to
+ * #explain-panels, which is where containers live in list view only — on the
+ * board they sit under #graph-nodes, so the two never fight over one element.
+ */
+#explain-panels > .ex-container.active-root.ex-min { flex: none; }
+#explain-panels > .ex-container.ex-min > .ex-ctabs,
+#explain-panels > .ex-container.ex-min > .ex-split { display: none; }
+
+.ex-head .ex-btn.ex-collapse:hover { color: var(--accent); }
 
 /* Per-container tab strip listing its children */
 .ex-ctabs {
@@ -1848,3 +1874,319 @@ mark.explain-src:hover { background: var(--yellow-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ------------------------------------------------------------------ *
+ * WORKSPACE PAGE (/workspaces)
+ *
+ * A full-screen picker: no top bar, no sidebar, no chat. main.js branches on
+ * the path and boots workspace-page.js instead of the app, so everything below
+ * is additive and inert on /app. It reuses the same token block, so both
+ * themes come for free.
+ * ------------------------------------------------------------------ */
+
+body.ws-page-mode #top-bar,
+body.ws-page-mode #main-row { display: none; }
+
+#ws-page[hidden] { display: none; }
+
+#ws-page {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  overflow-y: auto;
+  background-color: var(--bg);
+  background-image: var(--texture);
+  color: var(--text);
+  padding: 74px 28px 64px;
+}
+
+/* The only chrome on the page � a way back, not a header bar. */
+#ws-page-brand {
+  position: fixed;
+  top: 22px;
+  left: 28px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-decoration: none;
+}
+#ws-page-brand .ico { font-size: 17px; }
+#ws-page-brand:hover { color: var(--accent); }
+
+.ws-page-inner { max-width: 1040px; margin: 0 auto; }
+
+.ws-page-head h1 {
+  margin: 0 0 8px;
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.ws-page-head p {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.ws-page-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 30px 0 22px;
+}
+
+.ws-page-search {
+  flex: 1 1 320px;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+}
+.ws-page-search:focus-within { border-color: var(--accent); color: var(--accent); }
+.ws-page-search .ico { font-size: 17px; flex: none; }
+.ws-page-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14.5px;
+}
+.ws-page-search input::placeholder { color: var(--text-dim); }
+
+.ws-page-views {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg-panel);
+}
+.ws-page-views button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 13px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ws-page-views button:hover { color: var(--text); background: var(--user-bubble); }
+.ws-page-views button.on { color: var(--accent); background: var(--drop-tint); }
+
+/* ---------------- cards ---------------- */
+
+.ws-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  min-height: 158px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.ws-card:hover,
+.ws-card:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.ws-card-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--tag-line);
+  border-radius: 11px;
+  background: var(--drop-tint);
+  color: var(--accent);
+  font-size: 21px;
+}
+
+.ws-card-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  word-break: break-word;
+}
+.ws-card-meta {
+  margin: 0;
+  margin-top: auto;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.ws-card-go {
+  position: absolute;
+  right: 18px;
+  bottom: 17px;
+  color: var(--text-dim);
+  font-size: 15px;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+.ws-card:hover .ws-card-go,
+.ws-card:focus-visible .ws-card-go {
+  opacity: 1;
+  transform: none;
+  color: var(--accent);
+}
+
+.ws-card-del {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 15px;
+  cursor: pointer;
+  opacity: 0;
+}
+.ws-card:hover .ws-card-del,
+.ws-card:focus-within .ws-card-del,
+.ws-card-del:focus-visible { opacity: 1; outline: none; }
+.ws-card-del:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--danger-tint);
+}
+
+/* ---------------- grid view ---------------- */
+
+#ws-page-body[data-view='grid'] {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  gap: 16px;
+}
+
+/* ---------------- list view ---------------- */
+
+#ws-page-body[data-view='list'] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#ws-page-body[data-view='list'] .ws-card {
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  min-height: 0;
+  padding: 13px 16px;
+}
+#ws-page-body[data-view='list'] .ws-card-mark {
+  width: 36px;
+  height: 36px;
+  font-size: 17px;
+  flex: none;
+}
+#ws-page-body[data-view='list'] .ws-card-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#ws-page-body[data-view='list'] .ws-card-meta {
+  flex: none;
+  margin: 0;
+}
+#ws-page-body[data-view='list'] .ws-card-go {
+  position: static;
+  flex: none;
+  margin-left: auto;
+  opacity: 1;
+  transform: none;
+}
+#ws-page-body[data-view='list'] .ws-card-del {
+  position: static;
+  flex: none;
+  margin-left: 8px;
+  opacity: 0;
+}
+
+/* ---------------- create in place ---------------- */
+
+.ws-card-new {
+  border-style: dashed;
+  background: transparent;
+}
+.ws-card-new .ws-card-mark {
+  border-style: dashed;
+  background: transparent;
+}
+.ws-card-new .ws-card-name { color: var(--text-dim); }
+.ws-card.editing { cursor: text; transform: none; }
+.ws-card.editing .ws-card-go,
+.ws-card.editing .ws-card-del { display: none; }
+
+.ws-card-input {
+  width: 100%;
+  border: none;
+  border-bottom: 2px solid var(--accent);
+  background: none;
+  outline: none;
+  padding: 2px 0 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+}
+.ws-card-input::placeholder { color: var(--text-dim); font-weight: 400; }
+
+.ws-page-empty {
+  margin: 44px 0 0;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.ws-page-empty[hidden] { display: none; }
+
+@media (max-width: 640px) {
+  #ws-page { padding: 70px 18px 48px; }
+  #ws-page-brand { left: 18px; }
+  .ws-page-head h1 { font-size: 27px; }
+  #ws-page-body[data-view='list'] .ws-card-meta { display: none; }
+}

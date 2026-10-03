@@ -181,12 +181,12 @@ function sizeOf(n) {
 }
 
 /*
- * Column 0 is a plain vertical stack (summary, +, conversations, +).
- * The explanations hang off it as a tree, and the rule is simple: a parent is
- * centred on its children, so a branch grows UPWARD as well as downward — the
- * middle of three siblings lands level with its parent instead of the whole
- * stack being pushed below it. The rule applies at every level, so the
- * hierarchy stays smooth all the way down.
+ * Column 0 is a plain vertical stack (+, conversations, +) with the summary
+ * hanging off its LEFT side. The explanations hang off it as a tree, and the
+ * rule is simple: a parent is centred on its children, so a branch grows
+ * UPWARD as well as downward — the middle of three siblings lands level with
+ * its parent instead of the whole stack being pushed below it. The rule applies
+ * at every level, so the hierarchy stays smooth all the way down.
  *
  * Centring is only safe if each sibling reserves the upward half of the next
  * one BEFORE it is placed, otherwise a centred branch walks straight through
@@ -195,16 +195,67 @@ function sizeOf(n) {
  */
 function layout(model) {
   const pos = new Map();
+
+  /*
+   * The summary sits LEFT of the conversation it describes, arrow pointing in,
+   * rather than stacking on top of column 0. Column 0 slides right by its
+   * width to make room — so opening the summary moves the board SIDEWAYS, and
+   * every conversation still starts at y=0 instead of being pushed half a
+   * screen down by a panel nobody asked to see.
+   */
+  const sumNode = model.col0.find((n) => n.key === 'summary');
+  const off = sumNode ? sizeOf(sumNode).w + GAP_X : 0;
+
   let y = 0;
-  let col0w = 0;
+  let col0w = off;
   for (const n of model.col0) {
+    if (n === sumNode) continue;
     const s = sizeOf(n);
-    pos.set(n.key, { x: 0, y, w: s.w, h: s.h });
+    pos.set(n.key, { x: off, y, w: s.w, h: s.h });
     y += s.h + (n.kind === 'add' ? 18 : GAP_Y);
-    if (s.w > col0w) col0w = s.w;
+    if (off + s.w > col0w) col0w = off + s.w;
   }
 
-  if (!model.exps.length) return { pos, W: col0w, H: y };
+  /*
+   * Centred on the active conversation. A short conversation paired with a
+   * tall summary starts above y=0, and the canvas has a fixed box — a negative
+   * y is simply not reachable. Slide the WHOLE board down instead: everything
+   * is positioned relative to everything else, so this is a pure translation.
+   */
+  if (sumNode) {
+    const s = sizeOf(sumNode);
+    const cur = pos.get('c:' + state.currentId);
+    pos.set(sumNode.key, {
+      x: 0,
+      y: cur ? Math.round(cur.y + cur.h / 2 - s.h / 2) : 0,
+      w: s.w,
+      h: s.h,
+    });
+  }
+
+  const liftBoard = () => {
+    let lift = 0;
+    for (const p of pos.values()) if (p.y < lift) lift = p.y;
+    if (lift <= 0) return 0;
+    for (const p of pos.values()) p.y -= lift;
+    y -= lift;
+    return lift;
+  };
+
+  const box = () => {
+    let W = col0w;
+    let H = y;
+    for (const p of pos.values()) {
+      if (p.x + p.w > W) W = p.x + p.w;
+      if (p.y + p.h > H) H = p.y + p.h;
+    }
+    return { pos, W, H };
+  };
+
+  if (!model.exps.length) {
+    liftBoard();
+    return box();
+  }
 
   const colW = new Map();
   for (const n of model.exps) {
@@ -320,17 +371,10 @@ function layout(model) {
 
   /*
    * Centring a tall branch on a short conversation walks it off the top of
-   * the canvas, and the canvas has a fixed box — anything at a negative y is
-   * simply not reachable. Slide the WHOLE board down instead: everything is
-   * positioned relative to everything else, so this is a pure translation.
+   * the canvas — see liftBoard(). The reserve below needs the forest's real
+   * bottom AFTER that slide, so it gets the lift back.
    */
-  let lift = 0;
-  for (const p of pos.values()) if (p.y < lift) lift = p.y;
-  if (lift < 0) {
-    for (const p of pos.values()) p.y -= lift;
-    y -= lift;
-    forestBottom -= lift;
-  }
+  forestBottom -= liftBoard();
 
   /*
    * Reserve the space the explanations just claimed.
@@ -355,13 +399,7 @@ function layout(model) {
     }
   }
 
-  let W = col0w;
-  let H = y;
-  for (const p of pos.values()) {
-    if (p.x + p.w > W) W = p.x + p.w;
-    if (p.y + p.h > H) H = p.y + p.h;
-  }
-  return { pos, W, H };
+  return box();
 }
 
 /* ---------------- node elements ---------------- */
@@ -505,6 +543,19 @@ function applyExplain(el, n, idx) {
   bToggle.innerHTML = ico(open ? 'chev-up' : 'chev-down');
   bToggle.title = open ? 'Collapse this explanation' : 'Expand this explanation';
   bClose.hidden = false;
+
+  /*
+   * The container carries its own minimise control, because the chevron above
+   * is display:none exactly when you can see that header (while expanded).
+   * Keep its glyph in step so the two read as one switch.
+   */
+  const panel = panelEl(n.id);
+  const glyph = panel && panel.querySelector('.ex-collapse use');
+  if (glyph) {
+    glyph.setAttribute('href', open ? '#i-chev-up' : '#i-chev-down');
+    const ctl = glyph.closest('.ex-collapse');
+    if (ctl) ctl.title = open ? 'Minimise this container' : 'Expand this container';
+  }
 }
 
 /* ---------------- edges ---------------- */
@@ -527,6 +578,9 @@ function drawEdges(model, pos) {
   while (graphPaths.firstChild) graphPaths.removeChild(graphPaths.firstChild);
   const conv = pos.get('c:' + state.currentId);
   const convOn = isConvOpen(state.currentId);
+  /* The summary hangs to the LEFT of the conversation and points into it —
+   * same elbow as every other edge, just the one that reads right-to-left. */
+  if (pos.has('summary')) addPath(pos.get('summary'), conv, true);
   for (const r of model.roots) addPath(conv, pos.get('e:' + r), convOn);
   for (const n of model.exps) {
     const node = state.explains.nodes[n.id];
@@ -912,6 +966,23 @@ function onGraphClick(e) {
 
   const act = e.target.closest('.gn-act');
   if (act) { doAct(act); return; }
+
+  /*
+   * Minimise, from the container's own header. The node's chevron is hidden
+   * while an explanation is expanded — which is the only time this header is
+   * visible — so without this button there is no way to fold one from where
+   * you are reading it. stopImmediatePropagation holds off the .ex-head branch
+   * below AND the activate handler attachExplainHandlers() binds here: letting
+   * it fire would change activeId, and a changed activeId un-collapses the
+   * node again on the next render.
+   */
+  const min = e.target.closest('.ex-collapse');
+  if (min) {
+    e.stopImmediatePropagation();
+    const c = min.closest('.ex-container');
+    if (c && c.dataset.id) toggleExplain(c.dataset.id);
+    return;
+  }
 
   if (e.target.closest('.add-node')) { newChatBtn.click(); return; }
 

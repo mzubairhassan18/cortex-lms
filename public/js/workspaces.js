@@ -315,6 +315,10 @@ function renderSwitchMenu() {
         </button>`
       )}
       <div class="ws-menu-sep" role="separator"></div>
+      <a class="ws-menu-item all" href="/workspaces" role="menuitem">
+        <svg class="ico" aria-hidden="true"><use href="#i-grid"></use></svg>
+        <span class="ws-menu-name">All workspaces</span>
+      </a>
       ${editing === 'new'
         ? html`<input
             class="ws-menu-input"

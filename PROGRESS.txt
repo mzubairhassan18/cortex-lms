@@ -259,14 +259,56 @@ See PLAN.md 2.5 for the full write-up.
            #left-toggle joins #left-sidebar in display:none — that button only
            opens the list-view conversation list, which is the layout graph
            view replaced. Verified: none in graph, block in list.
+[x] P1.27 2026-10-04 Summary moved to the LEFT of the conversation. It used to
+           own the top of column 0 and pushed every conversation half a screen
+           down. Now it is centred on the active conversation with an arrow
+           pointing into it, and column 0 slides right by summaryW + GAP_X
+           (776px) to make room — so opening it moves the board SIDEWAYS, not
+           down. layout() restructured: `off` offset for column 0, summary
+           placed separately at x=0, `liftBoard()` now runs unconditionally
+           (a 560px panel centred on a 112px conversation starts above y=0),
+           `box()` derives W/H from the whole pos map.
+           Verified: summary (0,114,680x560), convs x=776, summary centre 394
+           === conversation centre 394, minY=0, 0 overlaps, arrow
+           "M 680 394 H 725 V 394 H 770"; closing restores x=0 and drops it.
+[x] P1.28 2026-10-04 Minimise button in the explain container header
+           (.ex-collapse, left of the ✕). The node's own chevron is
+           display:none while expanded — exactly when that header is on
+           screen — so there was no visible way to fold one mid-read.
+           graph: onGraphClick handles it with stopImmediatePropagation(),
+           which suppresses BOTH the bare-header fold and activateExplain on
+           the same element (a changed activeId re-opens the node on the next
+           render, so without it the fold would undo itself).
+           list: onExplainClick toggles .ex-min → container folds to just its
+           header; those rules are scoped to #explain-panels, where containers
+           live in list view only, so the two paths never touch one element.
+           Verified graph: 460x500 + gn-head:none → 344x104 + gn-head:flex,
+           STAYS collapsed, chevron re-opens to 460x500 and STAYS, activeId
+           unchanged throughout. Verified list: h 781 → 30 → 781.
+[x] P1.29 2026-10-04 Standalone /workspaces page. No top bar, no sidebar —
+           search, grid/list toggle, workspace names, create, delete. Same
+           document as /app: main.js branches on location.pathname and boots
+           public/js/workspace-page.js instead of the app, so sprite, tokens
+           and theme switch are shared, not duplicated. Entry points: the three
+           landing CTAs now point at /workspaces instead of /app, and the
+           sidebar switcher dropdown gains an "All workspaces" row (an <a>, so
+           it opens in a new tab). /app still opens directly on the remembered
+           workspace — existing UI untouched. New sprite symbols:
+           i-search/i-grid/i-list/i-trash (26 -> 30).
+           Verified: route 200, top-bar+main-row display:none, grid/list toggle
+           both ways, search filter ("phys" -> 1 hit, "zzzz" -> empty state),
+           create "ZZ test picker" then delete (confirm dialog) — back to the
+           original 2, theme round-trip dark->light->dark matches the app,
+           card click navigates to /app with the right id in lb.workspace.
 
 P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
 ------------------------------------------------------
 [ ] P2.1  Signup / login screen
-[x] P2.2  2026-10-03 Workspace picker — built early as the zoomed-out canvas
-          (#ws-layer, P1.19) instead of a separate route. Swap the card click
-          for an auth'd workspace choice later; the UI already exists.
-          Auth gate in front of /app still P2.1.
+[x] P2.2  2026-10-03 Workspace picker — TWO forms now: the zoomed-out canvas
+          (#ws-layer, P1.19) AND a standalone /workspaces route (P1.29) with
+          search + grid/list, reachable from the landing CTAs and the sidebar
+          dropdown. Both are unauthenticated; put the auth gate in front of
+          both when P2.1 lands. Card click already writes lb.workspace.
 [x] P2.3  2026-10-03 Create / rename / delete workspaces — server + card UI
           shipped in P1.18/P1.19. Delete guards: 409 while non-empty unless
           ?force=1 (then archived), last workspace untouchable.

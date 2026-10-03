@@ -319,6 +319,74 @@ in. Removed on the way down, so nothing is left hidden once you dive back.
 button only ever opened the list-view conversation list — precisely the layout
 graph view replaced.
 
+### 2.7 Summary placement, explain minimise, standalone workspaces — **IMPLEMENTED 2026-10-04**
+
+Three review requests: where the summary sits on the board, folding a single
+explanation while you read the rest, and a full-screen workspace page.
+
+**a) The summary hangs off the LEFT of the conversation**
+
+It used to occupy the top of column 0, which pushed every conversation half a
+screen down and had nothing to do with what it summarises — a panel above the
+board that read as "one more node in the stack". It now sits **to the left of
+the current conversation, vertically centred on it, with an arrow pointing
+right into it**. The container itself is unchanged.
+
+Consequences that fall out of that one move:
+
+- column 0 slides right by `DIM.summary.w + GAP_X` (776px), so opening the
+  summary moves the board **sideways**, not down. Conversations still start at
+  `y = 0`.
+- because the summary is centred on the conversation, a short conversation plus
+  a 560px panel can start above `y = 0`. The **lift** that used to run only for
+  over-tall explain branches is now `liftBoard()`, applied unconditionally at
+  the end of `layout()` — a pure translation of every node, never a clip.
+- `box()` computes `W`/`H` from the whole `pos` map rather than the column
+  accumulator, so a summary that overhangs the bottom of column 0 still fits.
+- `drawEdges()` gains one path: summary right edge → conversation left edge,
+  same elbow as every other arrow (`M 680 394 H 725 V 394 H 770`).
+
+Verified: summary `(0, 114, 680×560)`, conversations at `x = 776`,
+**summary centre 394 === conversation centre 394**, `minY = 0`, **0 node
+overlaps**, closing restores `x = 0` and drops the arrow.
+
+**b) Minimising an explanation from where you are reading it**
+
+The node's own chevron is `display: none` while a node is expanded — which is
+exactly when its container header is on screen — so an expanded explanation had
+no visible way to fold except clicking bare header space (no affordance) or
+switching conversations. `.ex-head` now carries an **`.ex-collapse` button**
+immediately left of the ✕.
+
+- graph view: `onGraphClick` handles it and calls `stopImmediatePropagation()`,
+  which suppresses both the bare-header fold below it and the `activateExplain`
+  from `attachExplainHandlers()` on the same element. That second one matters:
+  a changed `activeId` un-collapses the node on the next render, so the fold
+  would be undone immediately.
+- list view: `onExplainClick` handles it instead, toggling `.ex-min`, which
+  folds the container to just its header (`flex: none`, split and tab strip
+  hidden). Those rules are scoped to `#explain-panels`, where containers live
+  in list view only — on the board they sit under `#graph-nodes`, so the two
+  paths never touch the same element.
+- `applyExplain()` keeps the glyph and title in step with the node's state.
+
+Verified graph: `460×500` + `gn-head: none` → button 34×23 visible →
+`344×104` + `gn-head: flex` → **stays collapsed** → node chevron re-opens it to
+`460×500` → **stays expanded**, with `activeId` unchanged throughout. Verified
+list: `781px` → `.ex-min`, `h = 30`, split/ctabs `none`, back to `781px`.
+
+**c) A standalone page for workspaces**
+
+`/workspaces` is a full-screen picker with **no top bar and no sidebar** —
+search, a grid/list toggle, the workspace names, create and delete. It is the
+same document as `/app` (`main.js` branches on `location.pathname` and boots
+`workspace-page.js` instead of the app), so the icon sprite, theme tokens and
+theme switch are shared rather than duplicated. Reaching it: the landing page's
+three CTAs now point here instead of straight at `/app`, and the sidebar's
+workspace dropdown gains an **All workspaces** row (an `<a>`, so it can be
+opened in a new tab). `/app` still opens directly with the remembered
+workspace — the existing UI is untouched.
+
 ---
 
 ## 3. G5–G8 — Auth, workspaces, per-user data, BYOK

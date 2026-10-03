@@ -25,11 +25,22 @@ import { updateToolbarDensity } from './overlays.js';
 import { initTheme } from './theme.js';
 import { loadModels, loadSettings } from './settings.js';
 import { input, state } from './state.js';
+import { initWorkspacePage } from './workspace-page.js';
 
 /* ================= Init ================= */
 
 export async function init() {
   initTheme();   // theme first: no point painting a toolbar in the wrong scheme
+
+  /*
+   * /workspaces is the standalone picker: same document as /app, different
+   * shell. Branch before anything else is wired up — that screen has no
+   * sidebar, chat or graph, so booting them would race against an empty page.
+   */
+  if (location.pathname.replace(/\/+$/, '') === '/workspaces') {
+    initWorkspacePage();
+    return;
+  }
   // Before the loads below: if the graph view is remembered, its rebuild hook
   // has to be in place while conversations and explanations arrive.
   initGraph();

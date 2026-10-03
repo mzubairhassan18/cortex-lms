@@ -157,6 +157,13 @@ app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'landing.html')));
 app.get('/app', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/app/', (req, res) => res.redirect(302, '/app'));
+/*
+ * The standalone workspace picker. Same document as /app — main.js branches on
+ * the path and boots the picker instead of the app — so the icon sprite, theme
+ * tokens and theme switch are shared rather than duplicated.
+ */
+app.get('/workspaces', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/workspaces/', (req, res) => res.redirect(302, '/workspaces'));
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(CONV_FILE)) fs.writeFileSync(CONV_FILE, '[]');

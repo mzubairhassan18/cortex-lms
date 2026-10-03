@@ -30,6 +30,7 @@ export function createPanelEl(node) {
       <span class="ex-quote"><svg class="ico" aria-hidden="true"><use href="#i-bulb"></use></svg> "${escapeHtml(node.selection)}"</span>
       <span class="ex-badge" hidden></span>
       <span class="ex-busy" hidden>●●●</span>
+      <button class="ex-btn ex-collapse" title="Minimise this container" aria-label="Minimise this container"><svg class="ico" aria-hidden="true"><use href="#i-chev-down"></use></svg></button>
       <button class="ex-btn ex-close" title="Close this container and its nested ones"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
     </div>
     <div class="ex-ctabs" hidden></div>

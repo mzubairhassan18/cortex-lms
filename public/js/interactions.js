@@ -45,8 +45,8 @@ function onExplainInput(e) {
   if (e.target.classList && e.target.classList.contains('ep-input')) autoResize(e.target);
 }
 
-/* Child tabs (activate / close), header ✕ (close), collapsed pane (expand),
- * header click (activate). */
+/* Child tabs (activate / close), header ⌄ (minimise), header ✕ (close),
+ * collapsed pane (expand), header click (activate). */
 function onExplainClick(e) {
   // Highlighted source text (nested selections made inside this container)
   const mark = e.target.closest('mark.explain-src');
@@ -63,6 +63,23 @@ function onExplainClick(e) {
   const tab = e.target.closest('.ex-tab');
   if (tab) {
     activateExplain(tab.dataset.id);
+    return;
+  }
+  /*
+   * Minimise. Handled HERE only for list view — on the graph board
+   * graph.js's own click handler runs first on the same element and folds the
+   * NODE instead, so this branch never sees it there.
+   */
+  const min = e.target.closest('.ex-collapse');
+  if (min) {
+    e.stopPropagation();
+    const c = min.closest('.ex-container');
+    if (c) {
+      const on = c.classList.toggle('ex-min');
+      const use = min.querySelector('use');
+      if (use) use.setAttribute('href', on ? '#i-chev-up' : '#i-chev-down');
+      min.title = on ? 'Expand this container' : 'Minimise this container';
+    }
     return;
   }
   const close = e.target.closest('.ex-close');
