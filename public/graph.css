@@ -30,7 +30,7 @@ body.graph-mode #right-sidebar {
   right: 0;
   bottom: 0;
   z-index: 60;
-  box-shadow: -14px 0 34px rgba(0, 0, 0, 0.35);
+  box-shadow: -14px 0 34px var(--shadow-md);
 }
 
 /* Explain containers live as nodes in this mode, so their tab strip and
@@ -58,7 +58,9 @@ body.graph-mode .summary-node #summary-overlay {
   position: relative;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  /* The canvas backdrop: dotted grid over grain — an n8n-style board. */
+  background-color: var(--bg);
+  background-image: var(--dot-grid), var(--texture);
   overflow: hidden;
 }
 
@@ -72,9 +74,25 @@ body.graph-mode .summary-node #summary-overlay {
 }
 
 /* Sized in JS to the measured bounding box of every node, plus padding. */
+
+/* The zoom wrapper: JS writes its box as (unscaled size × zoom) so the
+ * scrollbars match what is painted, while #graph-canvas keeps its real
+ * size and is simply painted larger. */
+#graph-zoomer { position: relative; }
+
 #graph-canvas {
   position: relative;
+  transform-origin: 0 0;
+  cursor: grab;
 }
+/* Nodes are content, not board — only the empty board pans. */
+#graph-canvas .gnode { cursor: default; }
+
+/* Space + drag pans from anywhere, like Figma */
+#graph-scroll.can-pan { cursor: grab; }
+#graph-scroll.panning,
+#graph-scroll.panning #graph-canvas { cursor: grabbing; }
+#graph-scroll.panning { user-select: none; }
 
 #graph-edges {
   position: absolute;
@@ -125,10 +143,19 @@ body.graph-mode .summary-node #summary-overlay {
   color: var(--text-dim);
   font-size: 17px;
   cursor: pointer;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 18px var(--shadow-md);
   transition: color 0.12s, border-color 0.12s;
 }
 #graph-rail button:hover { color: var(--accent); border-color: var(--accent); }
+/* The zoom read-out is a button too (click resets to 100%) but it is wide. */
+#rail-zoom-label {
+  width: auto;
+  min-width: 40px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 
 /* ------------------------- node base ------------------------- */
 
@@ -140,12 +167,12 @@ body.graph-mode .summary-node #summary-overlay {
   border-radius: 14px;
   background: var(--bg-panel);
   overflow: hidden;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 8px 22px var(--shadow-sm);
   transition: border-color 0.14s, box-shadow 0.14s;
 }
 
 .gnode.is-current { border-color: var(--accent); }
-.gnode:hover { box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36); }
+.gnode:hover { box-shadow: 0 12px 28px var(--shadow-md); }
 
 /* Node header — clickable, collapses the node back to a chip. */
 .gn-head {
@@ -303,7 +330,9 @@ body.graph-mode .ex-vdiv:has(+ .ex-pane.ex-child:empty) { display: none; }
 #graph-empty.hidden { display: none; }
 #graph-empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
 
-/* Which layout am I in? */#view-toggle.on {
-  color: var(--accent);
+/* Which layout am I in? */
+#view-toggle.on {
+  background: var(--accent);
   border-color: var(--accent);
+  color: var(--bg-panel);
 }

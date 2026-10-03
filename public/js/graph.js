@@ -38,6 +38,10 @@ const graphNodes = $('graph-nodes');
 const graphEmpty = $('graph-empty');
 const viewToggle = $('view-toggle');
 const railSettings = $('rail-settings');
+const railZoomIn = $('rail-zoom-in');
+const railZoomOut = $('rail-zoom-out');
+const railZoomLabel = $('rail-zoom-label');
+const graphZoomer = $('graph-zoomer');
 
 const mainRow = $('main-row');
 const resizeHandle = $('resize-handle');
@@ -75,14 +79,30 @@ const collapsedConvs = new Set();   // current conversation folded by the user
 let lastActive = null;
 let sidebarWasOpen = false;
 let raf = 0;
+let rafFallback = 0;
 
 const hostOf = (el) => el.querySelector(':scope > .gn-host');
 const isConvOpen = (id) => id === state.currentId && !collapsedConvs.has(id);
 const isExpOpen = (id) => openExplains.has(id) && !userCollapsed.has(id);
 
+/*
+ * rAF is the right scheduler — it coalesces and lands just before paint. But
+ * a hidden tab never runs rAF, which would leave a requested render pending
+ * forever and freeze this module's state (collapse-on-scroll included) until
+ * someone shows the window. Arm a timer alongside it so a render always lands;
+ * whichever fires first cancels the other.
+ */
 function schedule() {
   if (state.view !== 'graph' || raf) return;
-  raf = requestAnimationFrame(() => { raf = 0; render(); });
+  const run = () => {
+    if (raf) cancelAnimationFrame(raf);
+    if (rafFallback) clearTimeout(rafFallback);
+    raf = 0;
+    rafFallback = 0;
+    render();
+  };
+  raf = requestAnimationFrame(run);
+  rafFallback = setTimeout(run, 120);
 }
 
 /* ---------------- moving live DOM in and out ---------------- */
@@ -435,6 +455,147 @@ function syncHosts(model) {
   }
 }
 
+/* ---------------- zoom & pan ---------------- */
+
+const ZOOM_KEY = 'lb.zoom';
+const ZOOM_MIN = 0.3;
+const ZOOM_MAX = 2.5;
+const ZOOM_RATIO = 1.2;   // one press, one notch on the ladder
+
+let zoom = 1;
+let baseW = 0;            // unscaled canvas size, straight from layout()
+let baseH = 0;
+
+const clampZoom = (z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+
+/*
+ * #graph-zoomer's box is the SCALED size, so the scrollbars agree with what
+ * is painted; #graph-canvas keeps its real size and is only painted larger.
+ * That keeps every child that is sized `inset: 0` (the SVG edge layer, the
+ * node layer) in unscaled coordinates — no coordinate maths anywhere else.
+ */
+function applyZoom() {
+  graphZoomer.style.width = (baseW * zoom) + 'px';
+  graphZoomer.style.height = (baseH * zoom) + 'px';
+  graphCanvas.style.transform = zoom === 1 ? '' : 'scale(' + zoom + ')';
+  if (railZoomLabel) railZoomLabel.textContent = Math.round(zoom * 100) + '%';
+}
+
+/* Zoom around a point of the viewport so what you are looking at stays put.
+ * cx/cy default to the centre of the viewport. */
+function setZoom(next, cx, cy) {
+  next = clampZoom(next);
+  if (next === zoom) return;
+  const el = graphScroll;
+  const ax = cx == null ? el.clientWidth / 2 : cx;
+  const ay = cy == null ? el.clientHeight / 2 : cy;
+  const px = (el.scrollLeft + ax) / zoom;
+  const py = (el.scrollTop + ay) / zoom;
+
+  zoom = next;
+  applyZoom();
+
+  el.scrollLeft = px * zoom - ax;
+  el.scrollTop = py * zoom - ay;
+  try { localStorage.setItem(ZOOM_KEY, String(zoom)); } catch { /* private mode */ }
+}
+
+/* Ctrl/Cmd + wheel zooms; a plain wheel keeps scrolling natively. */
+function onWheel(e) {
+  if (state.view !== 'graph') return;
+  if (!e.ctrlKey && !e.metaKey) return;
+  e.preventDefault();
+  const r = graphScroll.getBoundingClientRect();
+  setZoom(zoom * Math.pow(1.0015, -e.deltaY), e.clientX - r.left, e.clientY - r.top);
+}
+
+/* --- drag-to-pan (Figma style) --- */
+
+let pan = null;             // { id, x, y, sl, st, moved } while a drag is live
+let spaceDown = false;
+let swallowUntil = 0;       // a drag must not also fire the underlying click
+
+const isTyping = (t) => !!t && (
+  t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
+  t.tagName === 'SELECT' || t.isContentEditable
+);
+
+function canPanFrom(e) {
+  if (e.pointerType && e.pointerType !== 'mouse') return false; // touch keeps native scroll
+  if (state.view !== 'graph') return false;
+  if (e.button === 1) return true;                 // middle button: anywhere
+  if (e.button !== 0) return false;
+  if (spaceDown) return true;                      // space held: anywhere
+  return !e.target.closest('.gnode');              // left button: the board only
+}
+
+function onPointerDown(e) {
+  if (!canPanFrom(e)) return;
+  pan = { id: e.pointerId, x: e.clientX, y: e.clientY,
+          sl: graphScroll.scrollLeft, st: graphScroll.scrollTop, moved: false };
+}
+
+function endPan(e) {
+  if (!pan) return;
+  if (e && e.pointerId != null && e.pointerId !== pan.id) return;
+  const moved = pan.moved;
+  pan = null;
+  graphScroll.classList.remove('panning');
+  if (e && e.pointerId != null) {
+    try { graphScroll.releasePointerCapture(e.pointerId); } catch { /* not captured */ }
+  }
+  if (moved) swallowUntil = Date.now() + 250;
+}
+
+function onPointerMove(e) {
+  if (!pan || e.pointerId !== pan.id) return;
+  if (!e.buttons) { endPan(e); return; }           // released outside our reach
+  const dx = e.clientX - pan.x;
+  const dy = e.clientY - pan.y;
+  if (!pan.moved) {
+    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    pan.moved = true;
+    graphScroll.classList.add('panning');
+    try { graphScroll.setPointerCapture(e.pointerId); } catch { /* fine */ }
+  }
+  graphScroll.scrollLeft = pan.sl - dx;            // grab the board and drag it
+  graphScroll.scrollTop = pan.st - dy;
+}
+
+/* A drag should not also activate whatever node it ended over. */
+function onClickCapture(e) {
+  if (Date.now() > swallowUntil) return;
+  swallowUntil = 0;
+  e.stopPropagation();
+  e.preventDefault();
+}
+
+/* --- keyboard: space to pan, +/- to zoom, 0 to reset --- */
+
+function onKeyDown(e) {
+  if (state.view !== 'graph') return;
+  const t = e.target;
+
+  if (e.code === 'Space') {
+    if (isTyping(t) || (t && (t.tagName === 'BUTTON' || t.tagName === 'A'))) return;
+    spaceDown = true;
+    graphScroll.classList.add('can-pan');
+    e.preventDefault();
+    return;
+  }
+
+  if (isTyping(t)) return;
+  if (e.key === '+' || e.key === '=') { e.preventDefault(); setZoom(zoom * ZOOM_RATIO); }
+  else if (e.key === '-' || e.key === '_') { e.preventDefault(); setZoom(zoom / ZOOM_RATIO); }
+  else if (e.key === '0') { e.preventDefault(); setZoom(1); }
+}
+
+function onKeyUp(e) {
+  if (e.code !== 'Space') return;
+  spaceDown = false;
+  graphScroll.classList.remove('can-pan');
+}
+
 /* ---------------- render ---------------- */
 
 function render() {
@@ -478,6 +639,9 @@ function render() {
 
   graphCanvas.style.width = W + 'px';
   graphCanvas.style.height = H + 'px';
+  baseW = W;
+  baseH = H;
+  applyZoom();
   drawEdges(model, pos);
   syncHosts(model);
 
@@ -670,15 +834,18 @@ function onGraphClick(e) {
  * re-opens), so it cannot fight the user; a render already pending wins.
  */
 function onScroll() {
-  if (state.view !== 'graph' || raf) return;
-  const top = graphScroll.scrollTop;
-  const bot = top + graphScroll.clientHeight;
+  if (state.view !== 'graph') return;
+  /* Node geometry is in unscaled canvas coordinates; the scroll offsets are
+   * in scaled ones. Divide so the 140px slack stays 140 SCREEN pixels. */
+  const top = graphScroll.scrollTop / zoom;
+  const bot = top + graphScroll.clientHeight / zoom;
+  const slack = 140 / zoom;
   let dirty = false;
   for (const [key, el] of nodeEls) {
     if (el.dataset.kind !== 'explain' || !el.classList.contains('expanded')) continue;
     const y = parseFloat(el.style.top) || 0;
     const h = parseFloat(el.style.height) || 0;
-    if (y + h < top - 140 || y > bot + 140) {
+    if (y + h < top - slack || y > bot + slack) {
       openExplains.delete(el.dataset.id);
       userCollapsed.add(el.dataset.id);
       dirty = true;
@@ -744,6 +911,24 @@ export function initGraph() {
     return panel ? panel.dataset.id : '';
   });
   graphScroll.addEventListener('scroll', onScroll, { passive: true });
+  graphScroll.addEventListener('wheel', onWheel, { passive: false });
+  graphScroll.addEventListener('pointerdown', onPointerDown);
+  graphScroll.addEventListener('pointermove', onPointerMove);
+  graphScroll.addEventListener('pointerup', endPan);
+  graphScroll.addEventListener('pointercancel', endPan);
+  graphScroll.addEventListener('click', onClickCapture, true);
+  window.addEventListener('pointerup', endPan);
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', () => { spaceDown = false; graphScroll.classList.remove('can-pan'); });
+  railZoomIn && railZoomIn.addEventListener('click', () => setZoom(zoom * ZOOM_RATIO));
+  railZoomOut && railZoomOut.addEventListener('click', () => setZoom(zoom / ZOOM_RATIO));
+  railZoomLabel && railZoomLabel.addEventListener('click', () => setZoom(1));
+  try {
+    const saved = parseFloat(localStorage.getItem(ZOOM_KEY));
+    if (saved) zoom = clampZoom(saved);
+  } catch { /* private mode */ }
+  applyZoom();
   viewToggle.addEventListener('click', () => setView(state.view === 'graph' ? 'list' : 'graph'));
   railSettings.addEventListener('click', () => settingsBtn.click());
   applyLabel();

@@ -7,6 +7,19 @@
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="graph.css">
+  <script>
+    /* Set the theme before the stylesheet paints so there is no flash of the
+     * wrong colours. Mirrored by js/theme.js — keep the storage key in sync. */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('lb.theme'); } catch (e) { /* private mode */ }
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+          ? 'light' : 'dark';
+      }
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
 </head>
 <body>
   <div id="app">
@@ -16,6 +29,7 @@
       <button id="left-toggle" title="Toggle conversation list">☰</button>
       <span id="current-title">New conversation</span>
       <button id="view-toggle" title="Switch between list view and graph view">🗺<span class="btn-label"> Graph</span></button>
+      <button id="theme-toggle" title="Switch between dark and light theme">🌙</button>
       <button id="explains-toggle" class="hidden" title="Show explain windows">💡 <span class="btn-label">Explains</span> <span id="explains-count">0</span></button>
       <button id="summary-btn" title="Topics summary of this conversation">📋<span class="btn-label"> Summary</span></button>
       <button id="library-btn" title="Library — every file you uploaded">📚<span class="btn-label"> Library</span></button>
@@ -129,7 +143,11 @@
 
     <section id="graph-view" class="hidden" aria-label="Graph view">
       <div id="graph-scroll">
-        <div id="graph-canvas">
+        <!-- #graph-zoomer carries the zoom scale: its box is the SCALED size
+             (so the scrollbars match what is painted) while #graph-canvas
+             keeps its unscaled size and is simply painted larger. -->
+        <div id="graph-zoomer">
+          <div id="graph-canvas">
           <svg id="graph-edges" aria-hidden="true">
             <defs>
               <marker id="garrow" viewBox="0 0 10 10" refX="8.5" refY="5"
@@ -148,9 +166,13 @@
             <b>Nothing here yet</b>
             Start a chat — its explanations will branch off to the right.
           </div>
-        </div>
-      </div>
+        </div><!-- /#graph-canvas -->
+      </div><!-- /#graph-zoomer -->
+      </div><!-- /#graph-scroll -->
       <div id="graph-rail">
+        <button id="rail-zoom-out" title="Zoom out (−)">−</button>
+        <button id="rail-zoom-label" title="Reset zoom to 100% (0)">100%</button>
+        <button id="rail-zoom-in" title="Zoom in (+)">＋</button>
         <button id="rail-settings" title="Provider & API settings">⚙</button>
       </div>
     </section>

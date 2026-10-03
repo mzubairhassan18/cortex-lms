@@ -75,9 +75,39 @@ P1 — UI  (graph view, themes, landing page)
            Also verified this pass: full list-mode regression (switch conv,
            10 messages, ep-input autoResize, Enter -> real explain follow-up
            send, summary, library) — 0 console warnings.
-[ ] P1.14 Textured background
-[ ] P1.15 Theme system: light + dark, user-switchable, persists
+[x] P1.14 2026-10-03 Textured background — SVG turbulence grain at 5% (dark)
+           / 7% (light) on body, #top-bar, #chat-area and #graph-view only;
+           panels stay flat so they read as cards on a desk. The graph canvas
+           additionally paints a 26px dot grid (n8n board feel).
+[x] P1.15 2026-10-03 Theme system: light + dark, user-switchable, persists.
+           style.css `:root` = dark, `[data-theme='light']` overrides.
+           ALL colour lives in that token block — a CSSOM scan reports 0 raw
+           hex/rgba declarations outside it. Inline <script> in <head> sets
+           <html data-theme> before paint (no flash); js/theme.js owns the
+           switch (manual choice -> localStorage['lb.theme'], else follow OS).
+           Switch: #theme-toggle pill in the header.
 [ ] P1.16 Landing page at "/" (marketing copy, see research note above)
+[x] P1.17 2026-10-03 Graph canvas controls (added at user request):
+             zoom in/out — rail buttons (−, 100%, ＋), keys +/−/0,
+                       Ctrl/Cmd+wheel anchored at the cursor. 30%–250%,
+                       persisted to localStorage['lb.zoom'].
+             drag to pan — left-drag on empty board, middle-drag anywhere,
+                       Space+drag anywhere. Writes scrollLeft/scrollTop so
+                       native wheel/trackpad scrolling keeps working.
+             Architecture: #graph-scroll > #graph-zoomer (box = base × zoom)
+                       > #graph-canvas (real size, transform: scale(zoom)).
+                       Scroll extent always equals the painted size.
+             Verified: 1336px canvas × 1.373 = 1833.86px wrapper and
+                       scrollWidth 1906 = that + 72px padding; node rect
+                       46 → 55 → 66px at 1.0/1.2/1.44; drag from (400,300)
+                       by (−200,−150) lands on (600,450) exactly.
+             Bug fixed: #view-toggle had NO rules and rendered as a default
+                       OS button in both themes — now in the header pill group.
+             Bug fixed: onScroll compared unscaled node geometry with SCALED
+                       scroll offsets; now divides by zoom so the 140px slack
+                       stays 140 screen pixels. Verified at 137%.
+             Fixed: schedule() arms a 120ms timer beside rAF — a hidden tab
+                       never runs rAF, which froze collapse-on-scroll.
 
 GRAPH VIEW — IMPLEMENTATION NOTES (read before touching graph.js)
 ------------------------------------------------------------------
@@ -100,6 +130,9 @@ GRAPH VIEW — IMPLEMENTATION NOTES (read before touching graph.js)
 - Test data discipline: manual UI tests created 2 explanations and one
   "New conversation"; both were removed before the P1.1–P1.13 commit.
   Baseline data = 6 conversations, 10 messages on the active one, 0 explains.
+  NOTE 2026-10-03 later: a 7th conversation ("New conversation", ~28m old)
+  and an explanation appeared during the session — NOT test leftovers, they
+  are the user's own session data. Do not delete without asking.
 
 P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
 ------------------------------------------------------

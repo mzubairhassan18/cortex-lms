@@ -144,6 +144,51 @@ a `MutationObserver` rather than by calling into `overlays.js`.
 - [x] Settings reachable bottom-left; library still the sidebar overlay
 - [x] Round-trip list → graph → list restores containers in creation order
       with zero lost elements and zero console warnings
+- [x] **Zoom** — `+`/`−`/`0` keys, rail buttons, Ctrl/Cmd+wheel anchored at the
+      cursor; 30–250%, persisted to `lb.zoom`. Scroll extent always equals the
+      painted size (verified: 1336px canvas × 1.373 = 1833.86px wrapper,
+      scrollWidth 1906 = that + 72px padding)
+- [x] **Pan** — left-drag on the empty board, middle-drag anywhere,
+      Space+drag anywhere; a drag never clicks the node it ends over
+- [x] Collapse-on-scroll measures in *unscaled* coordinates so the 140px slack
+      stays 140 screen pixels at any zoom
+
+### 2.4 Zoom, pan, themes and texture — **IMPLEMENTED 2026-10-03**
+
+**Zoom** wraps the canvas instead of scaling it in place:
+
+```
+#graph-scroll  >  #graph-zoomer   (box = unscaled size × zoom → real scrollbars)
+                     > #graph-canvas  (real size, transform: scale(zoom))
+```
+
+Because the wrapper carries the *layout* box and the canvas only carries the
+*paint*, every `inset: 0` child (the SVG edge layer, the node layer) stays in
+unscaled coordinates — so nothing else in the module has to know about zoom.
+Anchoring is done by converting the scroll offset to content coordinates
+before the scale changes and back afterwards. Range 0.3–2.5, persisted to
+`lb.zoom`.
+
+**Pan** writes `scrollLeft`/`scrollTop` rather than a transform offset, so it
+composes with native wheel/trackpad scrolling for free. Started only from the
+empty board (left button), the middle button, or Space+drag; a completed drag
+swallows the click it would otherwise fire.
+
+**Themes** are one token block in `style.css`: `:root` *is* the dark theme and
+`[data-theme='light']` overrides it. Rule: **no literal colour may appear
+outside those two blocks** — including every `rgba(...)` alpha variant, so
+re-theming can never shift how an existing screen looks. An inline script in
+`<html data-theme>` runs before the stylesheet paints (no flash), and
+`js/theme.js` owns the switch: a manual choice persists to `lb.theme`,
+otherwise the OS preference is followed live.
+
+**Texture** — a 5%/7% SVG turbulence grain on the *backdrop* surfaces only
+(body, top bar, chat area, graph view); panels stay clean so they read as
+cards on a desk. The graph view adds a dotted grid over it (the n8n board).
+
+**Bug fixed on the way:** `#view-toggle` (added with P1.1) had no rules at all
+and rendered as a default OS button in both themes — it now shares the header
+pill group.
 
 ---
 
@@ -229,8 +274,9 @@ Route: `/` (public landing) → `/login` → `/workspaces` → `/app`.
 3. [x] Explanation `+` → arrow → node, nested
 4. [x] Summary node; new-chat `+`; Ask-explain arrow
 5. [x] Collapse-on-scroll
-6. [ ] Themes (light/dark) + textured background
-7. [ ] Landing page
+6. [x] Themes (light/dark) + textured background
+7. [x] Graph canvas controls: zoom in/out + drag-to-pan *(added at user request)*
+8. [ ] Landing page
 
 **P2 — Identity**
 8. Auth (signup/login)
@@ -274,3 +320,9 @@ Route: `/` (public landing) → `/login` → `/workspaces` → `/app`.
 | 2026-10-03 | `interactions.js` delegated handlers extracted behind `attachExplainHandlers(host)` — one body, two hosts (`#explain-panels` and the node layer). |
 | 2026-10-03 | `showSidebar(force)`: Library/Settings force it open in graph mode; explanation creation does not (explanations are nodes). |
 | 2026-10-03 | Scroll-collapse **never re-opens on its own** (140px slack) so it cannot fight the user. |
+| 2026-10-03 | **Zoom via a wrapper element** (`#graph-zoomer` sized `base × zoom`) + `transform: scale()` on the canvas, so scrollbars match the paint and no child coordinate system changes. |
+| 2026-10-03 | **Pan by writing scroll offsets**, not a transform — composes with native scrolling. Left-drag only from the empty board, plus middle-drag and Space+drag. |
+| 2026-10-03 | **All colour lives in one token block**; `:root` is dark, `[data-theme='light']` overrides. Zero raw colour declarations outside it (verified by scanning the CSSOM). |
+| 2026-10-03 | Theme default = OS preference, manual choice wins and persists (`lb.theme`); applied inline in `<head>` to avoid a flash. |
+| 2026-10-03 | Texture only on *backdrop* surfaces — panels stay flat so they read as cards on a desk. Graph canvas additionally gets a dot grid. |
+| 2026-10-03 | `schedule()` arms a 120 ms timer beside rAF: a hidden tab never runs rAF, which would otherwise freeze graph state (and collapse-on-scroll) until the window is shown. |

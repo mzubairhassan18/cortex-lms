@@ -10,28 +10,116 @@
   border: 2px solid transparent;
   background-clip: content-box;
 }
-::-webkit-scrollbar-thumb:hover { background-color: #45475a; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--border-hi); }
 ::-webkit-scrollbar-corner { background: transparent; }
 
-:root {
+/* ------------------------------------------------------------------ *
+ * THEME TOKENS
+ * Dark is the default (`:root`), light overrides via [data-theme=light].
+ * Every literal colour in the app must come from here — if you need a new
+ * one, add it to BOTH blocks, otherwise the light theme silently keeps the
+ * dark value.  Alpha variants keep their exact original percentages so
+ * theming never shifts how the current (dark) UI looks.
+ * ------------------------------------------------------------------ */
+
+:root,
+[data-theme='dark'] {
   --bg: #1e1e2e;
   --bg-alt: #181825;
   --bg-panel: #11111b;
+  --bg-sunken: #0d0d16;      /* code-block header strip */
   --border: #313244;
+  --border-hi: #45475a;      /* scrollbar thumb hover */
   --text: #cdd6f4;
   --text-dim: #a6adc8;
   --accent: #89b4fa;
   --accent2: #a6e3a1;
   --danger: #f38ba8;
+  --yellow: #f9e2af;         /* library button */
   --user-bubble: #313244;
   --assistant-bubble: #1e1e2e;
+
+  /* accent at each alpha the UI uses */
+  --drop-tint: rgba(137, 180, 250, 0.09);   /* file drag-over */
+  --tag-bg: rgba(137, 180, 250, 0.12);      /* topic tag */
+  --pick-bg: rgba(137, 180, 250, 0.14);     /* quiz option picked */
+  --count-bg: rgba(137, 180, 250, 0.25);    /* explains counter */
+  --tab-bg: rgba(137, 180, 250, 0.35);      /* explain tab counter */
+  --tag-line: rgba(137, 180, 250, 0.4);     /* topic tag border */
+
+  --green-line: rgba(166, 227, 161, 0.5);
+  --green-bg: rgba(166, 227, 161, 0.2);
+
+  --danger-tint: rgba(243, 139, 168, 0.14);  /* delete-chip hover wash */
+
+  /* dark ink sitting ON the accent fill — identical in both themes, because
+   * the accent itself carries the contrast there */
+  --on-accent-a: rgba(17, 17, 27, 0.25);
+  --on-accent-b: rgba(17, 17, 27, 0.35);
+
+  --yellow-bg: rgba(250, 227, 104, 0.22);
+  --yellow-line: rgba(250, 227, 104, 0.75);
+  --yellow-hover: rgba(250, 227, 104, 0.45);
+
+  --shadow-sm: rgba(0, 0, 0, 0.30);
+  --shadow-md: rgba(0, 0, 0, 0.45);
+  --shadow-lg: rgba(0, 0, 0, 0.50);
+
+  /* Background texture: a whisper of grain so flat colour reads as material.
+   * Second layer = dotted grid, only ever painted on the graph canvas. */
+  --texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+  --dot-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='1.5' cy='1.5' r='1.5' fill='%2389b4fa' fill-opacity='0.30'/%3E%3C/svg%3E");
+}
+
+[data-theme='light'] {
+  --bg: #eff1f5;
+  --bg-alt: #e6e9ef;
+  --bg-panel: #ffffff;
+  --bg-sunken: #dce0e8;
+  --border: #bcc0cc;
+  --border-hi: #9ca0ab;
+  --text: #4c4f69;
+  --text-dim: #6c6f85;
+  --accent: #1e66f5;
+  --accent2: #40a02b;
+  --danger: #d20f39;
+  --yellow: #b5690b;
+  --user-bubble: #dce0e8;
+  --assistant-bubble: #ffffff;
+
+  --drop-tint: rgba(30, 102, 245, 0.09);
+  --tag-bg: rgba(30, 102, 245, 0.10);
+  --pick-bg: rgba(30, 102, 245, 0.12);
+  --count-bg: rgba(30, 102, 245, 0.18);
+  --tab-bg: rgba(30, 102, 245, 0.25);
+  --tag-line: rgba(30, 102, 245, 0.40);
+
+  --green-line: rgba(64, 160, 43, 0.5);
+  --green-bg: rgba(64, 160, 43, 0.16);
+
+  --danger-tint: rgba(210, 15, 57, 0.12);
+
+  --on-accent-a: rgba(17, 17, 27, 0.25);
+  --on-accent-b: rgba(17, 17, 27, 0.35);
+
+  --yellow-bg: rgba(181, 105, 11, 0.14);
+  --yellow-line: rgba(181, 105, 11, 0.70);
+  --yellow-hover: rgba(181, 105, 11, 0.30);
+
+  --shadow-sm: rgba(50, 58, 84, 0.16);
+  --shadow-md: rgba(50, 58, 84, 0.22);
+  --shadow-lg: rgba(50, 58, 84, 0.26);
+
+  --texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.07'/%3E%3C/svg%3E");
+  --dot-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='1.5' cy='1.5' r='1.5' fill='%231e66f5' fill-opacity='0.35'/%3E%3C/svg%3E");
 }
 
 html, body { height: 100%; }
 
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: var(--texture);
   color: var(--text);
   overflow: hidden;
 }
@@ -49,7 +137,8 @@ body {
   gap: 12px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: var(--texture);
   min-width: 0;
 }
 
@@ -176,7 +265,8 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: var(--texture);
   container-type: inline-size; /* collapsed mark scales with the area */
 }
 
@@ -222,6 +312,7 @@ body {
 /* Compact toolbar (narrow window): only icons, labels hidden */
 body.compact-header #top-bar { gap: 6px; padding: 8px 10px; }
 body.compact-header .btn-label { display: none; }
+body.compact-header #view-toggle,
 body.compact-header #explains-toggle,
 body.compact-header #summary-btn,
 body.compact-header #library-btn { padding: 5px 9px; }
@@ -366,7 +457,7 @@ body.compact-header #model-select {
   justify-content: space-between;
   align-items: center;
   padding: 4px 10px;
-  background: #0d0d16;
+  background: var(--bg-sunken);
   border-bottom: 1px solid var(--border);
 }
 .code-lang {
@@ -428,7 +519,7 @@ body.compact-header #model-select {
   align-items: flex-end;
 }
 #input-form.dropping {
-  background: rgba(137, 180, 250, 0.09);
+  background: var(--drop-tint);
   border-top-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
@@ -453,7 +544,7 @@ body.compact-header #model-select {
   font-size: 12.5px;
   max-width: 260px;
 }
-.chip-link { border-color: rgba(166, 227, 161, 0.5); }
+.chip-link { border-color: var(--green-line); }
 .chip-name {
   white-space: nowrap;
   overflow: hidden;
@@ -471,7 +562,7 @@ body.compact-header #model-select {
   border-radius: 50%;
   line-height: 1.3;
 }
-.chip-x:hover { color: var(--danger); background: rgba(243, 139, 168, 0.15); }
+.chip-x:hover { color: var(--danger); background: var(--danger-tint); }
 
 /* Attach buttons left of the input */
 #attach-btn,
@@ -551,10 +642,12 @@ body.compact-header #model-select {
   46%, 100% { opacity: 0.2; }
 }
 
-/* Header button that reopens the explain panel */
+/* Header pills — layout, explains, summary, library, theme */
+#view-toggle,
 #explains-toggle,
 #summary-btn,
-#library-btn {
+#library-btn,
+#theme-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -567,26 +660,30 @@ body.compact-header #model-select {
   font-weight: 600;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
+#view-toggle:hover { background: var(--accent); color: var(--bg-panel); }
 #explains-toggle:hover { background: var(--accent); color: var(--bg-panel); }
 #explains-toggle.on { background: var(--accent); color: var(--bg-panel); }
-#explains-toggle.on #explains-count { background: rgba(17, 17, 27, 0.25); }
+#explains-toggle.on #explains-count { background: var(--on-accent-a); }
 #explains-toggle.hidden { display: none; }
 #summary-btn { border-color: var(--accent2); color: var(--accent2); }
 #summary-btn:hover { background: var(--accent2); color: var(--bg-panel); }
 /* Filled/active while the Summary overlay is open (like the Explains button) */
 #summary-btn.on { background: var(--accent2); color: var(--bg-panel); }
-#library-btn { border-color: #f9e2af; color: #f9e2af; }
+#library-btn { border-color: var(--yellow); color: var(--yellow); }
 #library-btn:hover,
-#library-btn.on { background: #f9e2af; color: var(--bg-panel); }
+#library-btn.on { background: var(--yellow); color: var(--bg-panel); }
+/* Theme switch reads as chrome, not as a feature pill */
+#theme-toggle { border-color: var(--border); color: var(--text-dim); padding: 5px 10px; }
+#theme-toggle:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-panel); }
 
 /* While the Summary overlay is open, the explainer tabs above it are hidden */
 body.summary-open #explain-tabs { display: none; }
 /* Same for the Library overlay */
 body.library-open #explain-tabs { display: none; }
 #explains-count {
-  background: rgba(137, 180, 250, 0.25);
+  background: var(--count-bg);
   border-radius: 999px;
   padding: 0 6px;
   font-size: 11px;
@@ -663,12 +760,12 @@ body.library-open #explain-tabs { display: none; }
   text-overflow: ellipsis;
 }
 .explain-tab .tab-count {
-  background: rgba(137, 180, 250, 0.35);
+  background: var(--tab-bg);
   border-radius: 8px;
   padding: 0 5px;
   font-size: 10px;
 }
-.explain-tab.active .tab-count { background: rgba(17, 17, 27, 0.35); }
+.explain-tab.active .tab-count { background: var(--on-accent-b); }
 .explain-tab .tab-close {
   border: none;
   background: none;
@@ -756,7 +853,7 @@ body.library-open #explain-tabs { display: none; }
 }
 .ex-head .ex-badge {
   flex: none;
-  background: rgba(166, 227, 161, 0.2);
+  background: var(--green-bg);
   color: var(--accent2);
   border-radius: 999px;
   padding: 1px 7px;
@@ -973,7 +1070,7 @@ body.library-open #explain-tabs { display: none; }
   padding: 3px;
   gap: 3px;
   z-index: 1000;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 4px 14px var(--shadow-md);
 }
 #selection-popup button {
   background: var(--accent);
@@ -1004,7 +1101,7 @@ body.library-open #explain-tabs { display: none; }
   border: 1px solid var(--danger);
   border-radius: 10px;
   z-index: 1100;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 6px 18px var(--shadow-lg);
 }
 #confirm-popup .confirm-msg {
   font-size: 12.5px;
@@ -1042,15 +1139,15 @@ body.library-open #explain-tabs { display: none; }
    (and widens) the matching explainer container. */
 
 mark.explain-src {
-  background: rgba(250, 227, 104, 0.22);
+  background: var(--yellow-bg);
   color: inherit;
-  border-bottom: 2px solid rgba(250, 227, 104, 0.75);
+  border-bottom: 2px solid var(--yellow-line);
   border-radius: 3px;
   padding: 1px 0;
   cursor: pointer;
   transition: background 0.12s;
 }
-mark.explain-src:hover { background: rgba(250, 227, 104, 0.45); }
+mark.explain-src:hover { background: var(--yellow-hover); }
 
 /* ---------------- Topics summary overlay ---------------- */
 
@@ -1211,8 +1308,8 @@ mark.explain-src:hover { background: rgba(250, 227, 104, 0.45); }
 .sum-group-label:first-child { margin-top: 0; }
 .sum-topics { display: flex; flex-wrap: wrap; gap: 6px; }
 .topic-tag {
-  background: rgba(137, 180, 250, 0.12);
-  border: 1px solid rgba(137, 180, 250, 0.4);
+  background: var(--tag-bg);
+  border: 1px solid var(--tag-line);
   color: var(--accent);
   border-radius: 999px;
   font-size: 12px;
@@ -1300,7 +1397,7 @@ mark.explain-src:hover { background: rgba(250, 227, 104, 0.45); }
   border-radius: 5px;
   line-height: 1;
 }
-.note-del:hover { color: var(--danger); background: rgba(243, 139, 168, 0.12); }
+.note-del:hover { color: var(--danger); background: var(--danger-tint); }
 .notes-empty-card { border-style: dashed; }
 .notes-hint {
   font-size: 12.5px;
@@ -1324,7 +1421,7 @@ mark.explain-src:hover { background: rgba(250, 227, 104, 0.45); }
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s, transform 0.2s;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 6px 18px var(--shadow-md);
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 /* ---------------- "Take a test" section (own card, below the session) ------- */
@@ -1432,7 +1529,7 @@ mark.explain-src:hover { background: rgba(250, 227, 104, 0.45); }
 .quiz-opt:hover { border-color: var(--accent); }
 .quiz-opt.picked {
   border-color: var(--accent);
-  background: rgba(137, 180, 250, 0.14);
+  background: var(--pick-bg);
 }
 .opt-letter {
   flex: none;

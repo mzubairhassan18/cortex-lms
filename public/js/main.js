@@ -21,12 +21,14 @@ import { loadConversations, selectConversation } from './conversations.js';
 import { updateCollapsed } from './explain-ui.js';
 import { initGraph } from './graph.js';
 import { updateToolbarDensity } from './overlays.js';
+import { initTheme } from './theme.js';
 import { loadModels, loadSettings } from './settings.js';
 import { input, state } from './state.js';
 
 /* ================= Init ================= */
 
 export async function init() {
+  initTheme();   // theme first: no point painting a toolbar in the wrong scheme
   // Before the loads below: if the graph view is remembered, its rebuild hook
   // has to be in place while conversations and explanations arrive.
   initGraph();
