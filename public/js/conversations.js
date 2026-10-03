@@ -19,7 +19,9 @@ import {
 
 export async function loadConversations() {
   try {
-    const res = await fetch('/api/conversations');
+    // Scoped to the open workspace — another workspace's chats never leak in.
+    const ws = state.workspaceId ? `?workspace=${encodeURIComponent(state.workspaceId)}` : '';
+    const res = await fetch(`/api/conversations${ws}`);
     state.conversations = await res.json();
   } catch {
     state.conversations = [];
@@ -39,7 +41,7 @@ export function renderConversationList() {
           >
             <span class="conv-title">${c.title}</span>
             <button class="conv-delete" data-id=${c.id} title="Delete conversation">
-              ✕
+              <svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg>
             </button>
           </div>`
         )}<//>`
@@ -120,21 +122,28 @@ export async function deleteConversation(id, e) {
   delete quizCache[id];
   delete testsCache[id];
   evictFileText(id); // extracted text is keyed per conversation — drop it
-  if (state.currentId === id) {
-    state.currentId = null;
-    state.messages = [];
-    state.notes = []; // these are per-conversation — never leak across
-    state.files = [];
-    renderChips();
-    clearExplainWindows();
-    state.summaryMode = 'summary';
-    state.quizView = null;
-    state.summaryExpanded = false;
-    renderSummary(null, '');
-    renderMessages();
-    updateTitle();
-  }
+  if (state.currentId === id) resetActiveConversation();
   renderConversationList();
+}
+
+/*
+ * "Nothing open" — clearing the main chat without touching the sidebar, the
+ * list, or anything the next conversation will need. Reached when the open
+ * conversation is deleted, and when the workspace you switch into is empty.
+ */
+export function resetActiveConversation() {
+  state.currentId = null;
+  state.messages = [];
+  state.notes = []; // these are per-conversation — never leak across
+  state.files = [];
+  renderChips();
+  clearExplainWindows();
+  state.summaryMode = 'summary';
+  state.quizView = null;
+  state.summaryExpanded = false;
+  renderSummary(null, '');
+  renderMessages();
+  updateTitle();
 }
 
 export function updateTitle() {

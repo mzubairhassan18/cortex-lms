@@ -124,6 +124,140 @@ body.graph-mode .summary-node #summary-overlay {
   z-index: 1;
 }
 
+/* Zoomed-out board: the conversations hand over to the workspaces holding
+ * them. Sits above #graph-scroll but below #graph-rail (z-index 40), so the
+ * zoom controls stay live and you can dive back in. */
+#ws-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow-y: auto;
+  padding: 44px 36px 92px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  animation: ws-in 0.16s ease-out;
+}
+#ws-layer.hidden { display: none; }
+/* A sheet floating on the board: the dot grid still reads through. */
+#ws-layer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: var(--bg);
+  background-image: var(--texture);
+  opacity: 0.93;
+}
+#ws-layer > * { position: relative; z-index: 1; }
+@keyframes ws-in {
+  from { opacity: 0; transform: scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ------------------------- workspace cards ------------------------- */
+
+.ws-head { text-align: center; max-width: 560px; }
+.ws-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.ws-title { margin: 6px 0 8px; font-size: 26px; color: var(--text); }
+.ws-sub { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+
+.ws-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+  max-width: 940px;
+}
+.ws-card {
+  position: relative;
+  width: 260px;
+  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  box-shadow: 0 8px 24px var(--shadow-md);
+  transition: transform 0.14s, border-color 0.14s, box-shadow 0.14s;
+}
+.ws-card:hover { transform: translateY(-3px); border-color: var(--accent); }
+.ws-card.current { border-color: var(--accent); }
+
+.ws-open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px 16px;
+  background: none;
+  border: none;
+  border-radius: 14px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+}
+.ws-name { font-size: 15px; font-weight: 700; line-height: 1.3; }
+.ws-count { font-size: 12px; color: var(--text-dim); }
+.ws-open.ws-new .ws-name { color: var(--accent); }
+
+.ws-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.ws-card:hover .ws-tools,
+.ws-card:focus-within .ws-tools { opacity: 1; }
+.ws-tool {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ws-tool:hover { color: var(--accent); border-color: var(--accent); }
+
+.ws-badge {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg-panel);
+}
+.ws-card.current .ws-open { padding-top: 30px; }
+
+.ws-rename {
+  flex: 1;
+  margin: 18px 16px;
+  padding: 9px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+}
+
 /* Bottom-left floating rail — Settings stays exactly where the spec wants it. */
 #graph-rail {
   position: absolute;

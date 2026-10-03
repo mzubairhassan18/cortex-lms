@@ -128,6 +128,27 @@ body {
 
 #main-row { flex: 1; display: flex; min-height: 0; }
 
+/* ---------------- Icon system ----------------
+ * Every control draws from the #ico-sprite in index.html: 24x24 line icons,
+ * one weight, no fills. They render at 1em so each icon tracks the font-size
+ * of the control it sits in, and currentColor keeps them in step with the
+ * theme and with hover states. */
+
+.ico {
+  width: 1em;
+  height: 1em;
+  display: inline-block;
+  vertical-align: -0.14em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+/* A lone icon that lost its text still needs to look centred in the control. */
+button > .ico:only-child { display: block; margin: 0 auto; }
+
 /* ---------------- Top toolbar (full width, never crowds) ---------------- */
 
 #top-bar {

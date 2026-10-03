@@ -213,6 +213,7 @@ function layout(model) {
   const cur = pos.get('c:' + state.currentId);
   const minY = cur ? cur.y : 0;
   let cursor = minY;
+  let forestBottom = minY;   // lowest edge any explanation reached
 
   const place = (id, depth) => {
     const key = 'e:' + id;
@@ -248,7 +249,31 @@ function layout(model) {
   for (const r of model.roots) {
     cursor = Math.max(cursor, minY);
     const sub = place(r, 1);
+    if (sub.bottom > forestBottom) forestBottom = sub.bottom;
     cursor = sub.bottom + GAP_Y * 1.4;
+  }
+
+  /*
+   * Reserve the space the explanations just claimed.
+   *
+   * Column 0 stacks conversations one under the other, while the forest above
+   * is drawn in columns to the RIGHT — so without this, expanding an
+   * explanation runs down the page straight through every conversation
+   * listed after the current one. Each conversation therefore owns a
+   * vertical band: everything below the current one starts where the current
+   * one plus its explanations ends.
+   */
+  const iCur = model.col0.findIndex((n) => n.key === 'c:' + state.currentId);
+  if (iCur >= 0 && iCur < model.col0.length - 1) {
+    const here = pos.get(model.col0[iCur].key);
+    const floor = Math.max(here.y + here.h, forestBottom) + GAP_Y;
+    const natural = pos.get(model.col0[iCur + 1].key).y;
+    const shift = Math.max(0, floor - natural);
+    if (shift > 0) {
+      for (let i = iCur + 1; i < model.col0.length; i++) {
+        pos.get(model.col0[i].key).y += shift;
+      }
+    }
   }
 
   let W = col0w;
@@ -268,10 +293,14 @@ function mk(cls, tag = 'div') {
   return el;
 }
 
+/* A control icon from the sprite in index.html. Only ever called with names
+ * we hard-code — user text is set through textContent elsewhere. */
+const ico = (name) => `<svg class="ico" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
+
 function gnHead(icon, title, acts) {
   const head = mk('gn-head');
   const ic = mk('gn-icon');
-  ic.textContent = icon;
+  ic.innerHTML = ico(icon);
   const t = mk('gn-title');
   t.textContent = title;
   const a = mk('gn-acts');
@@ -279,7 +308,7 @@ function gnHead(icon, title, acts) {
     const b = mk('gn-act', 'button');
     b.type = 'button';
     b.dataset.act = act;
-    b.textContent = glyph;
+    b.innerHTML = ico(glyph);
     b.title = label;
     a.appendChild(b);
   }
@@ -293,7 +322,7 @@ function buildEl(kind) {
 
   if (kind === 'add') {
     el.classList.add('add-node');
-    el.textContent = '+';
+    el.innerHTML = ico('plus');
     el.title = 'New chat';
     return el;
   }
@@ -301,10 +330,10 @@ function buildEl(kind) {
   if (kind === 'conv') {
     el.classList.add('conv-node');
     el.append(
-      gnHead('💬', '', [
-        ['explains', '＋', 'Reveal this conversation’s explanations'],
-        ['summary', '📋', 'Topics summary of this conversation'],
-        ['toggle', '⌄', 'Collapse this conversation'],
+      gnHead('message', '', [
+        ['explains', 'plus', 'Reveal this conversation’s explanations'],
+        ['summary', 'clipboard', 'Topics summary of this conversation'],
+        ['toggle', 'chev-down', 'Collapse this conversation'],
       ]),
       mk('gn-preview'),
       mk('gn-meta'),
@@ -316,9 +345,9 @@ function buildEl(kind) {
   if (kind === 'explain') {
     el.classList.add('explain-node', 'collapsed');
     el.append(
-      gnHead('💡', '', [
-        ['toggle', '⌄', 'Expand this explanation'],
-        ['close', '✕', 'Close this explanation'],
+      gnHead('bulb', '', [
+        ['toggle', 'chev-down', 'Expand this explanation'],
+        ['close', 'x', 'Close this explanation'],
       ]),
       mk('gn-preview'),
       mk('gn-meta'),
@@ -366,11 +395,11 @@ function applyConv(el, n) {
     ? 'Active conversation — click to fold'
     : 'Click to open';
   el.querySelector('.gn-meta').textContent = when(n.data.updatedAt);
-  el.querySelector('.gn-head .gn-icon').textContent = open ? '🗂' : '💬';
+  el.querySelector('.gn-head .gn-icon').innerHTML = ico(open ? 'folder' : 'message');
   const [bExplains, bSummary, bToggle] = el.querySelectorAll('.gn-act');
   bExplains.hidden = !(current && state.explains.roots.length > 0);
   bSummary.hidden = false;
-  bToggle.textContent = open ? '⌃' : '⌄';
+  bToggle.innerHTML = ico(open ? 'chev-up' : 'chev-down');
   bToggle.title = open ? 'Collapse this conversation' : 'Expand this conversation';
 }
 
@@ -394,7 +423,7 @@ function applyExplain(el, n, idx) {
       : 'Explanation';
   }
   const [bToggle, bClose] = el.querySelectorAll('.gn-act');
-  bToggle.textContent = open ? '⌃' : '⌄';
+  bToggle.innerHTML = ico(open ? 'chev-up' : 'chev-down');
   bToggle.title = open ? 'Collapse this explanation' : 'Expand this explanation';
   bClose.hidden = false;
 }
@@ -479,6 +508,10 @@ function applyZoom() {
   graphZoomer.style.height = (baseH * zoom) + 'px';
   graphCanvas.style.transform = zoom === 1 ? '' : 'scale(' + zoom + ')';
   if (railZoomLabel) railZoomLabel.textContent = Math.round(zoom * 100) + '%';
+  /* Tell whoever cares (the workspace layer) that we crossed out of the
+   * conversation level. Same indirection as state.onGraphChange: the zoom
+   * owner never imports its observers, so there is no module cycle. */
+  if (state.onZoomChange) state.onZoomChange(zoom);
 }
 
 /* Zoom around a point of the viewport so what you are looking at stays put.
@@ -668,8 +701,8 @@ function closeSidebarQuietly() {
 function applyLabel() {
   const graph = state.view === 'graph';
   viewToggle.innerHTML = graph
-    ? '📋<span class="btn-label"> List</span>'
-    : '🗺<span class="btn-label"> Graph</span>';
+    ? ico('clipboard') + '<span class="btn-label"> List</span>'
+    : ico('map') + '<span class="btn-label"> Graph</span>';
   viewToggle.title = graph ? 'Back to the list layout' : 'Switch to the node graph';
   viewToggle.classList.toggle('on', graph);
 }
@@ -924,6 +957,10 @@ export function initGraph() {
   railZoomIn && railZoomIn.addEventListener('click', () => setZoom(zoom * ZOOM_RATIO));
   railZoomOut && railZoomOut.addEventListener('click', () => setZoom(zoom / ZOOM_RATIO));
   railZoomLabel && railZoomLabel.addEventListener('click', () => setZoom(1));
+  /* Published so the workspace layer can jump back to 100% after you pick a
+   * workspace — it must not import this module (graph.js is a leaf). */
+  state.zoomTo = (z) => setZoom(z);
+  state.zoomLevel = () => zoom;
   try {
     const saved = parseFloat(localStorage.getItem(ZOOM_KEY));
     if (saved) zoom = clampZoom(saved);

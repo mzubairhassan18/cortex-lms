@@ -59,7 +59,7 @@ export async function createConversation() {
   const res = await fetch('/api/conversations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: 'New conversation' }),
+    body: JSON.stringify({ title: 'New conversation', workspaceId: state.workspaceId || undefined }),
   });
   const conv = await res.json();
   state.conversations.unshift(conv);

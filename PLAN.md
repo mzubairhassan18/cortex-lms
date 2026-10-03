@@ -190,6 +190,62 @@ cards on a desk. The graph view adds a dotted grid over it (the n8n board).
 and rendered as a default OS button in both themes — it now shares the header
 pill group.
 
+### 2.5 Workspaces, conversation bands, one icon system — **IMPLEMENTED 2026-10-03**
+
+Three requests from the same review, shipped together because they all touch
+the graph shell.
+
+**a) Workspaces (the local half of P2 item 10, before auth exists)**
+
+- `data/workspaces.json` — `{id, name, createdAt, updatedAt}` next to the
+  conversations, same no-dependency JSON rule.
+- Boot migration (`migrateWorkspaces()`): there is always at least one
+  workspace, and every conversation carries a `workspaceId`. Data written
+  before workspaces existed is adopted by the first workspace, so an upgrade
+  can never orphan or lose anything. Verified: **1 workspace, 7 conversations
+  adopted**.
+- Routes: `GET/POST/PUT/DELETE /api/workspaces`. `DELETE` is a **409** while
+  the workspace still holds conversations unless `?force=1` — and even then the
+  conversations are appended to `conversations.deleted.json`, never vanished.
+- `GET /api/conversations?workspace=<id>` and `GET /api/files?workspace=<id>`
+  scope the lists; `POST`/`PUT /api/conversations` accept `workspaceId`.
+- Client: `state.workspaces` + `state.workspaceId` (persisted to
+  `lb.workspace`), reconciled against the server before the first list load, so
+  a remembered-but-deleted workspace can never leave you with an empty app.
+- **The zoomed-out canvas** — `public/js/workspaces.js` renders `#ws-layer`
+  (a sheet floating over the board: `--texture` scrim at 93% so the dot grid
+  still reads through). Past `ZOOM_WS = 0.5` the conversation nodes hand over
+  to the workspace cards; clicking one switches and dives back to 100%.
+  Create / rename / delete live on the cards themselves.
+
+*Dependency direction:* `workspaces.js` imports `conversations.js` but never
+`graph.js`. The graph publishes `state.zoomTo` / `state.zoomLevel` /
+`state.onZoomChange` instead — the same rule that already governs
+`state.onGraphChange`, so there is no module cycle.
+
+**b) Conversations respect the space their explanations occupy**
+
+Column 0 stacked conversations while the explain forest grew in the columns to
+the right, so expanding an explanation ran down the page straight through every
+conversation listed after it. `layout()` now records how far the forest
+actually reached and shifts everything below the current conversation so the
+next one starts **where the current one plus its explanations end**.
+Verified: forest `top 564 → bottom 2137`, next conversation at `2163`
+(= `2137 + GAP_Y`), zero overlaps.
+
+**c) One icon system**
+
+Buttons mixed `☰ 🗺 🌙 💡 📋 📚 🤖 ⚙ ✕ ⌃ ⌄ ↻ ＋` from half a dozen fonts.
+There is now a single sprite (`#ico-sprite`, 26 symbols, 24×24, `currentColor`
+stroke) and one `.ico` rule sized `1em`, so every control shares one weight and
+tracks the font-size of whatever it sits in. Converted: header, rail, overlay
+heads, node headers, the collapse/expand chevron, explain tabs, input row,
+workspace cards, notes card and the copy buttons. Content emoji (👋 🏆 📎 ⚠️)
+are deliberately left alone — they are messages, not controls.
+
+The theme switch now shows a **sun on dark / moon on light** instead of always
+a moon, and the chat avatar matches the header's node-graph mark.
+
 ---
 
 ## 3. G5–G8 — Auth, workspaces, per-user data, BYOK
@@ -320,7 +376,7 @@ scheme (verified: light-visit → `/app` → still light).
 
 **P2 — Identity**
 9. Auth (signup/login) — gate in front of `/app`
-10. Workspaces (cards → app)
+10. Workspaces (cards → app) — *local half done in §2.5; auth + user scoping remain*
 11. User/workspace scoping on every route
 12. BYOK (per-user provider + key, stored server-side)
 13. Migrate existing local data *(pending Q6)*

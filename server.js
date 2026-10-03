@@ -26,6 +26,7 @@ const CONV_BAK = `${CONV_FILE}.bak`;
 // Append-only record of removed conversations (see the DELETE route).
 const CONV_DELETED = path.join(DATA_DIR, 'conversations.deleted.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+const WS_FILE = path.join(DATA_DIR, 'workspaces.json'); // grouping for conversations
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads'); // per-conversation attachments
 const TEXT_CAP = 200000; // chars of extracted text kept per file (system prompt)
 
@@ -159,6 +160,7 @@ app.get('/app/', (req, res) => res.redirect(302, '/app'));
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(CONV_FILE)) fs.writeFileSync(CONV_FILE, '[]');
+migrateWorkspaces(); // runs before the first request: nothing lands outside a workspace
 
 function loadConversations() {
   try {
@@ -178,11 +180,79 @@ function saveConversations(list) {
   fs.writeFileSync(CONV_FILE, JSON.stringify(list, null, 2));
 }
 
+// ---------- Workspaces ----------
+// A workspace is a named bucket of conversations — the unit the graph view
+// zooms out to. Plain JSON next to the conversations, same no-dependency rule.
+
+function loadWorkspaces() {
+  try {
+    const list = JSON.parse(fs.readFileSync(WS_FILE, 'utf8'));
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveWorkspaces(list) {
+  fs.writeFileSync(WS_FILE, JSON.stringify(list, null, 2));
+}
+
+function newId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+/* Boot migration: every conversation belongs to exactly one workspace and
+ * there is always at least one workspace to belong to. Data written before
+ * workspaces existed is adopted by the first workspace, created here if the
+ * file is new — so nothing is ever orphaned or lost on upgrade. */
+function migrateWorkspaces() {
+  let ws = loadWorkspaces();
+  const convs = loadConversations();
+  let touchedFile = false;
+
+  if (!ws.length) {
+    ws = [{ id: newId(), name: 'My workspace', createdAt: Date.now(), updatedAt: Date.now() }];
+    touchedFile = true;
+  }
+
+  const known = new Set(ws.map((w) => w.id));
+  const home = ws[0].id;
+  let adopted = 0;
+  for (const c of convs) {
+    if (!c.workspaceId || !known.has(c.workspaceId)) {
+      c.workspaceId = home;
+      adopted++;
+    }
+  }
+  if (adopted) saveConversations(convs);
+  if (touchedFile) saveWorkspaces(ws);
+  if (adopted || touchedFile) {
+    console.log(`🗂  Workspaces ready — ${ws.length} workspace(s), ${adopted} conversation(s) adopted.`);
+  }
+  return ws;
+}
+
+/* Workspace a new/moved conversation lands in when the client doesn't say. */
+function defaultWorkspaceId() {
+  const ws = loadWorkspaces();
+  return ws.length ? ws[0].id : null;
+}
+
+/* Returns null when the id is fine, or an Error to send as a 400. */
+function badWorkspace(id) {
+  if (loadWorkspaces().some((w) => w.id === id)) return null;
+  const e = new Error('Unknown workspace');
+  e.status = 400;
+  return e;
+}
+
 // ---------- Conversation CRUD ----------
 
 app.get('/api/conversations', (req, res) => {
+  const wsId = String(req.query.workspace || '').trim();
   const list = loadConversations()
-    .map(({ id, title, updatedAt }) => ({ id, title, updatedAt }))
+    .filter((c) => !wsId || c.workspaceId === wsId)
+    .map(({ id, title, updatedAt, workspaceId }) => ({ id, title, updatedAt, workspaceId }))
     .sort((a, b) => b.updatedAt - a.updatedAt);
   res.json(list);
 });
@@ -195,9 +265,16 @@ app.get('/api/conversations/:id', (req, res) => {
 
 app.post('/api/conversations', (req, res) => {
   const list = loadConversations();
+  let wsId = defaultWorkspaceId();
+  if (req.body.workspaceId) {
+    const bad = badWorkspace(String(req.body.workspaceId));
+    if (bad) return res.status(bad.status || 400).json({ error: bad.message });
+    wsId = req.body.workspaceId;
+  }
   const conv = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    id: newId(),
     title: req.body.title || 'New conversation',
+    workspaceId: wsId,
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -211,6 +288,12 @@ app.put('/api/conversations/:id', (req, res) => {
   const list = loadConversations();
   const conv = list.find((c) => c.id === req.params.id);
   if (!conv) return res.status(404).json({ error: 'Not found' });
+  // Move between workspaces (the zoomed-out canvas can do this too).
+  if ('workspaceId' in req.body && req.body.workspaceId) {
+    const bad = badWorkspace(String(req.body.workspaceId));
+    if (bad) return res.status(bad.status || 400).json({ error: bad.message });
+    conv.workspaceId = req.body.workspaceId;
+  }
   // Partial updates: only overwrite the fields the client sends.
   if ('messages' in req.body) {
     conv.messages = Array.isArray(req.body.messages) ? req.body.messages : [];
@@ -416,14 +499,98 @@ app.delete('/api/conversations/:id/files/:fid', (req, res) => {
 
 /* Library: every file across every conversation (newest first). */
 app.get('/api/files', (req, res) => {
+  const wsId = String(req.query.workspace || '').trim();
   const out = [];
   for (const c of loadConversations()) {
+    if (wsId && c.workspaceId !== wsId) continue;
     for (const f of c.files || []) {
       out.push({ ...f, convId: c.id, convTitle: c.title });
     }
   }
   out.sort((a, b) => (b.at || 0) - (a.at || 0));
   res.json(out);
+});
+
+// ---------- Workspace CRUD ----------
+
+app.get('/api/workspaces', (req, res) => {
+  const counts = new Map();
+  for (const c of loadConversations()) {
+    counts.set(c.workspaceId, (counts.get(c.workspaceId) || 0) + 1);
+  }
+  res.json(
+    loadWorkspaces().map((w) => ({
+      ...w,
+      conversationCount: counts.get(w.id) || 0, // drives the zoomed-out cards
+    }))
+  );
+});
+
+app.post('/api/workspaces', (req, res) => {
+  const name = String((req.body && req.body.name) || '').trim().slice(0, 60);
+  if (!name) return res.status(400).json({ error: 'A workspace needs a name.' });
+  const list = loadWorkspaces();
+  const ws = { id: newId(), name, createdAt: Date.now(), updatedAt: Date.now() };
+  list.push(ws);
+  saveWorkspaces(list);
+  res.json({ ...ws, conversationCount: 0 });
+});
+
+app.put('/api/workspaces/:id', (req, res) => {
+  const list = loadWorkspaces();
+  const ws = list.find((w) => w.id === req.params.id);
+  if (!ws) return res.status(404).json({ error: 'Not found' });
+  if (typeof req.body.name === 'string') {
+    const name = req.body.name.trim().slice(0, 60);
+    if (name) {
+      ws.name = name;
+      ws.updatedAt = Date.now();
+    }
+  }
+  saveWorkspaces(list);
+  const count = loadConversations().filter((c) => c.workspaceId === ws.id).length;
+  res.json({ ...ws, conversationCount: count });
+});
+
+/* Deleting a workspace that still holds conversations would silently take the
+ * work with it, so that case is a 409 unless ?force=1 — and even then the
+ * conversations are archived to conversations.deleted.json, never vanished. */
+app.delete('/api/workspaces/:id', (req, res) => {
+  const list = loadWorkspaces();
+  const i = list.findIndex((w) => w.id === req.params.id);
+  if (i < 0) return res.status(404).json({ error: 'Not found' });
+  if (list.length === 1) return res.status(409).json({ error: 'The last workspace cannot be deleted.' });
+
+  const convs = loadConversations();
+  const inside = convs.filter((c) => c.workspaceId === req.params.id);
+  const force = String(req.query.force || '') === '1';
+  if (inside.length && !force) {
+    return res.status(409).json({
+      error: `This workspace still holds ${inside.length} conversation${inside.length === 1 ? '' : 's'}.`,
+      count: inside.length,
+    });
+  }
+
+  if (inside.length) {
+    const stamped = inside.map((c) => ({ ...c, deletedAt: Date.now() }));
+    try {
+      const prior = JSON.parse(fs.readFileSync(CONV_DELETED, 'utf8'));
+      fs.writeFileSync(CONV_DELETED, JSON.stringify([...prior, ...stamped], null, 2));
+    } catch {
+      fs.writeFileSync(CONV_DELETED, JSON.stringify(stamped, null, 2));
+    }
+    for (const c of inside) {
+      try {
+        fs.rmSync(path.join(UPLOAD_DIR, c.id), { recursive: true, force: true });
+      } catch { /* nothing stored */ }
+    }
+    saveConversations(convs.filter((c) => c.workspaceId !== req.params.id));
+    console.log(`🗂  Deleted workspace "${list[i].name}" with ${inside.length} conversation(s) (archived).`);
+  }
+
+  list.splice(i, 1);
+  saveWorkspaces(list);
+  res.json({ ok: true });
 });
 
 // ---------- Settings (provider + API key) ----------

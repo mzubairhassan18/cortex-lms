@@ -20,6 +20,7 @@ import { renderMessages } from './chat.js';
 import { loadConversations, selectConversation } from './conversations.js';
 import { updateCollapsed } from './explain-ui.js';
 import { initGraph } from './graph.js';
+import { initWorkspaces } from './workspaces.js';
 import { updateToolbarDensity } from './overlays.js';
 import { initTheme } from './theme.js';
 import { loadModels, loadSettings } from './settings.js';
@@ -32,6 +33,9 @@ export async function init() {
   // Before the loads below: if the graph view is remembered, its rebuild hook
   // has to be in place while conversations and explanations arrive.
   initGraph();
+  // Workspaces must be reconciled first — loadConversations() scopes the list
+  // to state.workspaceId, and a remembered id may no longer exist.
+  await initWorkspaces();
   await loadSettings();
   await loadModels();
   await loadConversations();

@@ -27,6 +27,11 @@ export const state = {
   // View mode: the classic list layout, or the horizontal node graph.
   // Persisted so the choice survives a reload.
   view: localStorage.getItem('lb.view') === 'graph' ? 'graph' : 'list',
+  /* Workspaces bucket the conversations: zoom the graph out past ZOOM_WS and
+   * they appear as cards. `workspaceId` is the one currently open; it survives
+   * a reload, and loadWorkspaces() reconciles it against the server. */
+  workspaces: [],
+  workspaceId: localStorage.getItem('lb.workspace') || '',
   /* Set by graph.js while the node view is live, cleared when it unmounts.
    * The conversation and explain modules call it after they change so the
    * graph can rebuild — they never import graph.js, which would be a cycle. */

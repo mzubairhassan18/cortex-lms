@@ -128,9 +128,14 @@ export function renderMarkdown(src) {
 }
 
 /* Cortex badge shown at the top-left edge of assistant responses. */
-/* The exact mark from the app header ("🧠 Cortex") — shown above
- * each response as-is, no badge background. */
-export const AVATAR_MARK = '🧠';
+/* The mark from the app header (the Cortex node-graph glyph) — shown above
+ * each response as-is, no badge background. Same sprite as every control. */
+export const AVATAR_MARK =
+  '<svg class="ico avatar-ico" aria-hidden="true"><use href="#i-graph"></use></svg>';
+
+/* Control icon helper: same sprite the rest of the UI draws from. */
+export const copyIco = (id) =>
+  `<svg class="ico" aria-hidden="true"><use href="#${id}"></use></svg>`;
 
 /* One message as a Preact vnode. Text/markdown is inserted the same way as
  * before — the body goes through renderMarkdown() (which escapes the source)
@@ -144,7 +149,11 @@ export function messageVNode(m, i, scope) {
   ></div>`;
   if (isUser) return html`<div class="msg user">${bubble}</div>`;
   return html`<div class="msg assistant">
-    <span class="msg-avatar" title="Cortex">${AVATAR_MARK}</span>
+    <span
+      class="msg-avatar"
+      title="Cortex"
+      dangerouslySetInnerHTML=${{ __html: AVATAR_MARK }}
+    ></span>
     <div class="msg-body">
       ${bubble}
       <button
@@ -154,7 +163,7 @@ export function messageVNode(m, i, scope) {
         data-scope=${scope || null}
         title="Copy the whole response"
       >
-        ⧉ Copy
+        <svg class="ico" aria-hidden="true"><use href="#i-copy"></use></svg> Copy
       </button>
     </div>
   </div>`;
@@ -186,7 +195,9 @@ export async function copyText(text, btn) {
   }
   if (btn) {
     const old = btn.innerHTML;
-    btn.textContent = ok ? '✓ Copied' : '✗ Failed';
+    btn.innerHTML = ok
+      ? copyIco('i-check') + ' Copied'
+      : copyIco('i-x') + ' Failed';
     btn.classList.add('copied');
     setTimeout(() => {
       btn.innerHTML = old;
@@ -213,7 +224,7 @@ export function decorateCopy(root) {
     btn.type = 'button';
     btn.className = 'code-copy';
     btn.title = 'Copy code to clipboard';
-    btn.textContent = '⧉ Copy';
+    btn.innerHTML = copyIco('i-copy') + ' Copy';
     const bar = document.createElement('div');
     bar.className = 'code-head';
     bar.appendChild(head);

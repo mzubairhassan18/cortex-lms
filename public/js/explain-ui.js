@@ -27,10 +27,10 @@ export function createPanelEl(node) {
   el.dataset.id = node.id;
   el.innerHTML = `
     <div class="ex-head" title="${escapeHtml(node.selection)}">
-      <span class="ex-quote">💡 "${escapeHtml(node.selection)}"</span>
+      <span class="ex-quote"><svg class="ico" aria-hidden="true"><use href="#i-bulb"></use></svg> "${escapeHtml(node.selection)}"</span>
       <span class="ex-badge" hidden></span>
       <span class="ex-busy" hidden>●●●</span>
-      <button class="ex-btn ex-close" title="Close this container and its nested ones">✕</button>
+      <button class="ex-btn ex-close" title="Close this container and its nested ones"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
     </div>
     <div class="ex-ctabs" hidden></div>
     <div class="ex-split">
@@ -38,7 +38,7 @@ export function createPanelEl(node) {
         <div class="explain-messages"></div>
         <form class="ep-input-form">
           <textarea class="ep-input" rows="1" placeholder="Ask a follow-up question..."></textarea>
-          <button type="submit" class="ep-send" title="Send">➤</button>
+          <button type="submit" class="ep-send" title="Send"><svg class="ico" aria-hidden="true"><use href="#i-send"></use></svg></button>
         </form>
       </div>
     </div>`;
@@ -116,9 +116,9 @@ export function renderExplainTabs() {
       const kids = childrenOf(id).length;
       return `
         <button class="explain-tab ${activeRoot && id === activeRoot.id ? 'active' : ''}" data-id="${id}" title="${escapeHtml(n.selection)}">
-          <span class="tab-label">💡 ${escapeHtml(truncateLabel(n.selection))}</span>
+          <span class="tab-label"><svg class="ico" aria-hidden="true"><use href="#i-bulb"></use></svg> ${escapeHtml(truncateLabel(n.selection))}</span>
           ${kids ? `<span class="tab-count">${kids}</span>` : ''}
-          <span class="tab-close" data-close="${id}" title="Close this container and its nested ones">✕</span>
+          <span class="tab-close" data-close="${id}" title="Close this container and its nested ones"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></span>
         </button>`;
     })
     .join('');
@@ -142,8 +142,8 @@ export function renderChildTabs(parentId, kids) {
     .map(
       (c) => `
       <button class="ex-tab ${state.explains.activeId === c.id ? 'active' : ''}" data-id="${c.id}" title="${escapeHtml(c.selection)}">
-        <span class="tab-label">💡 ${escapeHtml(truncateLabel(c.selection, 18))}</span>
-        <span class="tab-close" data-close="${c.id}" title="Close this container">✕</span>
+        <span class="tab-label"><svg class="ico" aria-hidden="true"><use href="#i-bulb"></use></svg> ${escapeHtml(truncateLabel(c.selection, 18))}</span>
+        <span class="tab-close" data-close="${c.id}" title="Close this container"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></span>
       </button>`
     )
     .join('');

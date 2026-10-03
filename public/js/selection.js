@@ -219,7 +219,7 @@ export async function polishNote(convId, noteId) {
   } catch { /* keep the verbatim note */ }
 }
 
-/* "📌 Your notes" card — rendered under the AI summary, always present.
+/* "Your notes" card — rendered under the AI summary, always present.
  * Returns a vnode, not an HTML string: Preact escapes every text child, so
  * only the AI-polished inline markdown (already escaped, then run through
  * renderInline) goes through dangerouslySetInnerHTML — same rule as bubbles. */
@@ -227,13 +227,16 @@ export function notesSectionVNode() {
   const notes = state.notes || [];
   if (!notes.length) {
     return html`<div class="notes-card notes-empty-card">
-      <div class="notes-head">📌 Your notes</div>
-      <div class="notes-hint">Select any text in the chat and press 📌 Note — your notes live here and survive summary regeneration.</div>
+      <div class="notes-head">
+        <svg class="ico" aria-hidden="true"><use href="#i-pin"></use></svg> Your notes
+      </div>
+      <div class="notes-hint">Select any text in the chat and press Note in the popup — your notes live here and survive summary regeneration.</div>
     </div>`;
   }
   return html`<div class="notes-card">
     <div class="notes-head">
-      📌 Your notes <span class="notes-count">${notes.length}</span>
+      <svg class="ico" aria-hidden="true"><use href="#i-pin"></use></svg> Your notes
+      <span class="notes-count">${notes.length}</span>
     </div>
     <ul class="notes-list">
       ${notes.map((n) => {
@@ -252,7 +255,7 @@ export function notesSectionVNode() {
           />
           ${shown ? html`<div class="note-src">from: “${shown}”</div>` : null}
           <button type="button" class="note-del" data-note=${n.id} title="Delete this note">
-            ✕
+            <svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg>
           </button>
         </li>`;
       })}

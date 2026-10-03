@@ -22,19 +22,57 @@
   </script>
 </head>
 <body>
+  <!--
+    One icon system for every control: 24x24 line icons, single weight, drawn
+    in currentColor so they inherit each button's colour in both themes.
+    Replaces the mixed emoji/typographic glyphs (☰ 🗺 🌙 💡 ⌄ ✕ …) that used to
+    sit on buttons, which never quite matched each other. Usage:
+        <svg class="ico" aria-hidden="true"><use href="#i-name"></use></svg>
+    Styling lives on .ico in style.css (width/height = 1em, so it tracks the
+    surrounding font-size).
+  -->
+  <svg id="ico-sprite" aria-hidden="true" focusable="false" style="display:none">
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4 3 6.5v14L9 18l6 2.5 6-2.5v-14L15 6.5 9 4zM9 4v14M15 6.5v14"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M21.5 12h-2.2M4.7 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5.5 5.5 0 0 0 18 7 6 6 0 0 0 6 7c0 1 .2 2.2 1.5 3 .8.8 1.3 1.5 1.5 2.5M9 18h6M10 21.5h4"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><path d="M9 4.5h6v3H9zM9 6H6a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-11A1.5 1.5 0 0 0 18 6h-3M8.5 12h7M8.5 15.5h4.5"/></symbol>
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 4.5h4.5v15H4zM9.5 4.5H14v15H9.5zM15.6 5.4l3.9.9-2.2 13.4-3.9-.9z"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 3v2.5M6 8h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM2 12.5h2M20 12.5h2M9.5 12.5h.01M14.5 12.5h.01M9 18v2M15 18v2"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.5 13.5a4.5 4.5 0 0 0 6.4 0l2.6-2.6a4.5 4.5 0 0 0-6.4-6.4l-1.4 1.4M13.5 10.5a4.5 4.5 0 0 0-6.4 0l-2.6 2.6a4.5 4.5 0 1 0 6.4 6.4l1.4-1.4"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5.5 12h13"/></symbol>
+    <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="M6.5 9.5 12 15l5.5-5.5"/></symbol>
+    <symbol id="i-chev-up" viewBox="0 0 24 24"><path d="M6.5 14.5 12 9l5.5 5.5"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M20.5 11.5a7.5 7.5 0 0 1-7.5 7.5H7.8L3.5 21.5V11.5a7.5 7.5 0 0 1 7.5-7.5h2a7.5 7.5 0 0 1 7.5 7.5z"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8A1.5 1.5 0 0 1 20.5 10v8A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z"/></symbol>
+    <symbol id="i-graph" viewBox="0 0 24 24"><circle cx="5.5" cy="7" r="2.4"/><circle cx="18.5" cy="6" r="2.4"/><circle cx="17" cy="18" r="2.4"/><path d="M7.8 7.2l8.4-1M7.2 8.9l8.3 7.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1M20.5 4v4.5H16"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4v4.5H8"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h13M13 7l5 5-5 5"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19.5V6.5M6.6 11.6 12 6.2l5.4 5.4"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L19.6 8.4a2.1 2.1 0 0 0-3-3L5 17v3z"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h9.5A1.5 1.5 0 0 1 20 10.5V20a1.5 1.5 0 0 1-1.5 1.5H9A1.5 1.5 0 0 1 7.5 20v-9.5A1.5 1.5 0 0 1 9 9zM4.5 15A1.5 1.5 0 0 1 3 13.5V4A1.5 1.5 0 0 1 4.5 2.5H14A1.5 1.5 0 0 1 15.5 4v1"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19.5 7"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21v-6M8.5 3h7l-1 5 3 3.5H6.5L9.5 8z"/></symbol>
+  </svg>
+
   <div id="app">
 
     <!-- Top toolbar: full width so controls never crowd when the chat shrinks -->
     <div id="top-bar">
-      <button id="left-toggle" title="Toggle conversation list">☰</button>
+      <button id="left-toggle" title="Toggle conversation list"><svg class="ico" aria-hidden="true"><use href="#i-menu"></use></svg></button>
       <span id="current-title">New conversation</span>
-      <button id="view-toggle" title="Switch between list view and graph view">🗺<span class="btn-label"> Graph</span></button>
-      <button id="theme-toggle" title="Switch between dark and light theme">🌙</button>
-      <button id="explains-toggle" class="hidden" title="Show explain windows">💡 <span class="btn-label">Explains</span> <span id="explains-count">0</span></button>
-      <button id="summary-btn" title="Topics summary of this conversation">📋<span class="btn-label"> Summary</span></button>
-      <button id="library-btn" title="Library — every file you uploaded">📚<span class="btn-label"> Library</span></button>
+      <button id="view-toggle" title="Switch between list view and graph view"><svg class="ico" aria-hidden="true"><use href="#i-map"></use></svg><span class="btn-label"> Graph</span></button>
+      <button id="theme-toggle" title="Switch between dark and light theme"><svg class="ico" aria-hidden="true"><use href="#i-moon"></use></svg></button>
+      <button id="explains-toggle" class="hidden" title="Show explain windows"><svg class="ico" aria-hidden="true"><use href="#i-bulb"></use></svg> <span class="btn-label">Explains</span> <span id="explains-count">0</span></button>
+      <button id="summary-btn" title="Topics summary of this conversation"><svg class="ico" aria-hidden="true"><use href="#i-clipboard"></use></svg><span class="btn-label"> Summary</span></button>
+      <button id="library-btn" title="Library — every file you uploaded"><svg class="ico" aria-hidden="true"><use href="#i-library"></use></svg><span class="btn-label"> Library</span></button>
       <div id="model-wrap" title="Model">
-        <span id="model-icon">🤖</span>
+        <span id="model-icon"><svg class="ico" aria-hidden="true"><use href="#i-bot"></use></svg></span>
         <select id="model-select" title="Model"></select>
       </div>
     </div>
@@ -44,15 +82,15 @@
     <!-- Left sidebar: conversation history -->
     <aside id="left-sidebar">
       <div class="left-header">
-        <span class="logo">🧠 Cortex</span>
+        <span class="logo"><svg class="ico" aria-hidden="true"><use href="#i-graph"></use></svg> Cortex</span>
       </div>
-      <button id="new-chat-btn">+ New Chat</button>
+      <button id="new-chat-btn"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg> New Chat</button>
       <div id="conversation-list"></div>
       <!-- Static footer: active provider/model + settings entry -->
       <div id="sidebar-footer">
-        <div id="footer-model" title="Active provider and model">🤖 …</div>
+        <div id="footer-model" title="Active provider and model">…</div>
         <div id="footer-info" hidden title="Context window and usage limits"></div>
-        <button id="settings-btn" title="Provider & API settings">⚙ Settings</button>
+        <button id="settings-btn" title="Provider & API settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"></use></svg> Settings</button>
       </div>
     </aside>
 
@@ -62,8 +100,8 @@
 
       <form id="input-form">
         <div id="attach-chips" hidden></div>
-        <button type="button" id="attach-btn" title="Attach a file — or drag &amp; drop onto the input">＋</button>
-        <button type="button" id="link-btn" title="Attach a link">🔗</button>
+        <button type="button" id="attach-btn" title="Attach a file — or drag &amp; drop onto the input"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+        <button type="button" id="link-btn" title="Attach a link"><svg class="ico" aria-hidden="true"><use href="#i-link"></use></svg></button>
         <textarea id="input" rows="1" placeholder="Ask anything...  (Enter to send, Shift+Enter for new line)"></textarea>
         <button type="submit" id="send-btn" title="Send">
           <svg class="send-idle" viewBox="0 0 24 24" aria-hidden="true">
@@ -85,19 +123,19 @@
       <div id="sidebar-header">
         <div id="explain-tabs" title="Root explainer containers (created from the main chat)"></div>
         <div class="sidebar-actions">
-          <button id="sidebar-reset" title="Clear this container's conversation">↺</button>
-          <button id="sidebar-close" title="Hide panel (containers are kept)">✕</button>
+          <button id="sidebar-reset" title="Clear this container's conversation"><svg class="ico" aria-hidden="true"><use href="#i-undo"></use></svg></button>
+          <button id="sidebar-close" title="Hide panel (containers are kept)"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
         </div>
       </div>
       <div id="explainer-body">
         <div id="explain-panels"></div>
         <div id="summary-overlay" class="hidden">
           <div class="summary-head">
-            <span class="summary-title">📋 Topics — what I've learned</span>
+            <span class="summary-title"><svg class="ico" aria-hidden="true"><use href="#i-clipboard"></use></svg> Topics — what I've learned</span>
             <span id="summary-status"></span>
             <span id="test-badges" title="Tests taken"></span>
-            <button id="summary-refresh" title="Regenerate summary & test now">↻</button>
-            <button id="summary-close" title="Close (containers stay)" class="summary-x">✕</button>
+            <button id="summary-refresh" title="Regenerate summary & test now"><svg class="ico" aria-hidden="true"><use href="#i-refresh"></use></svg></button>
+            <button id="summary-close" title="Close (containers stay)" class="summary-x"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
           </div>
           <div id="summary-body">
             <div id="summary-card-slot"></div>
@@ -106,9 +144,9 @@
         </div>
         <div id="settings-overlay" class="hidden">
           <div class="summary-head">
-            <span class="summary-title">⚙ Settings</span>
+            <span class="summary-title"><svg class="ico" aria-hidden="true"><use href="#i-gear"></use></svg> Settings</span>
             <span id="settings-status"></span>
-            <button id="settings-close" title="Close (containers stay)" class="summary-x">✕</button>
+            <button id="settings-close" title="Close (containers stay)" class="summary-x"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
           </div>
           <div id="settings-body">
             <label class="set-label" for="set-provider">Model provider</label>
@@ -132,9 +170,9 @@
         </div>
         <div id="library-overlay" class="hidden">
           <div class="summary-head">
-            <span class="summary-title">📚 Library — every file</span>
+            <span class="summary-title"><svg class="ico" aria-hidden="true"><use href="#i-library"></use></svg> Library — every file</span>
             <span id="library-status"></span>
-            <button id="library-close" title="Close" class="summary-x">✕</button>
+            <button id="library-close" title="Close" class="summary-x"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
           </div>
           <div id="library-body"></div>
         </div>
@@ -169,11 +207,14 @@
         </div><!-- /#graph-canvas -->
       </div><!-- /#graph-zoomer -->
       </div><!-- /#graph-scroll -->
+      <!-- Zoomed out past ~50%: the conversations give way to the workspaces
+           that hold them. Lives outside #graph-scroll so it never scales. -->
+      <div id="ws-layer" class="hidden" aria-label="Workspaces"></div>
       <div id="graph-rail">
-        <button id="rail-zoom-out" title="Zoom out (−)">−</button>
+        <button id="rail-zoom-out" title="Zoom out (−)"><svg class="ico" aria-hidden="true"><use href="#i-minus"></use></svg></button>
         <button id="rail-zoom-label" title="Reset zoom to 100% (0)">100%</button>
-        <button id="rail-zoom-in" title="Zoom in (+)">＋</button>
-        <button id="rail-settings" title="Provider & API settings">⚙</button>
+        <button id="rail-zoom-in" title="Zoom in (+)"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+        <button id="rail-settings" title="Provider & API settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"></use></svg></button>
       </div>
     </section>
 
@@ -183,8 +224,8 @@
 
   <!-- Floating popup shown when text is selected -->
   <div id="selection-popup">
-    <button type="button" data-act="explain" title="Explain in a side panel">💡 Explain</button>
-    <button type="button" data-act="note" title="Save to my notes in the summary">📌 Note</button>
+    <button type="button" data-act="explain" title="Explain in a side panel"><svg class="ico" aria-hidden="true"><use href="#i-bulb"></use></svg> Explain</button>
+    <button type="button" data-act="note" title="Save to my notes in the summary"><svg class="ico" aria-hidden="true"><use href="#i-pin"></use></svg> Note</button>
   </div>
 
   <!-- Shown next to a container's ✕: closing deletes it permanently. -->

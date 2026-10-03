@@ -76,7 +76,7 @@ export async function renderLibrary() {
               data-fid=${f.id}
               title="Delete file"
             >
-              ✕
+              <svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg>
             </button>
           </div>`
         )}

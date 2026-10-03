@@ -27,7 +27,7 @@ export function renderChips() {
       <span class="chip-ico">${f.link ? '🔗' : '📎'}</span>
       <span class="chip-name">${escapeHtml(f.name)}</span>
       <span class="chip-meta">${f.link ? 'link' : fmtSize(f.size)}</span>
-      <button type="button" class="chip-x" data-fid="${f.id}" title="Remove this attachment">✕</button>
+      <button type="button" class="chip-x" data-fid="${f.id}" title="Remove this attachment"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
     </span>`
     )
     .join('');

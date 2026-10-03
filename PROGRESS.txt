@@ -31,7 +31,7 @@ P1 — UI  (graph view, themes, landing page)
 -------------------------------------------
 STATUS 2026-10-03: P1 COMPLETE (P1.1–P1.16 all [x]). Remaining work is all
                    P2 (identity) — see PLAN.md §6. Commits: 7da4c0c (graph),
-                   716e0c4 (themes/texture/zoom/pan), next (landing + Cortex).
+                   716e0c4 (themes/texture/zoom/pan), 31c6850 (landing + Cortex).
 [x] P1.1  2026-10-03 Header view toggle: list <-> graph, persists in
            localStorage['lb.view']. Button flips 🗺 Graph / 📋 List.
 [x] P1.2  2026-10-03 Tree layout — NOT a separate graph/layout.js: layout lives
@@ -155,17 +155,88 @@ GRAPH VIEW — IMPLEMENTATION NOTES (read before touching graph.js)
   and an explanation appeared during the session — NOT test leftovers, they
   are the user's own session data. Do not delete without asking.
 
+P1.5 — WORKSPACES, CONVERSATION BANDS, ICON SYSTEM
+--------------------------------------------------
+STATUS 2026-10-03: complete. One commit, three requests from the same review.
+See PLAN.md 2.5 for the full write-up.
+[x] P1.17 2026-10-03 Stop the local Ollama server (was pid 8972 + "ollama app"
+           20184, port 11434 now clear). No code change — Auto falls straight
+           through the dead localhost to the free keyless gateways: Kilo Code,
+           LLM7.io, OVHcloud. Probe 581ms. Revert: Ollama settings-switch work
+           I had started was unmade entirely (git checkout of 4 files) at the
+           user's request — "just stop it, no change in the ui side".
+           Restart later with `ollama serve`. ENV OLLAMA_ENABLED=0 still exists
+           in README for hiding it permanently, zero UI work.
+[x] P1.18 2026-10-03 Workspaces — data/local half. data/workspaces.json,
+           GET/POST/PUT/DELETE /api/workspaces, ?workspace= scoping on
+           /api/conversations and /api/files, workspaceId on POST/PUT.
+           Boot migration adopt existing data: 1 workspace, 7 conversations.
+           DELETE is 409 while conversations remain unless ?force=1, and then
+           they are archived to conversations.deleted.json — never vanished.
+           12/12 API tests pass.
+[x] P1.19 2026-10-03 Zoomed-out workspace canvas. #ws-layer in graph view,
+           visible at <= ZOOM_WS (0.5); card grid floats on a --texture scrim
+           (93%) so the dot grid reads through; click dives back to 100%.
+           Create/rename/delete live on the cards. New module
+           public/js/workspaces.js.
+           NOTE: it imports conversations.js but NEVER graph.js — the graph
+           publishes state.zoomTo / state.zoomLevel / state.onZoomChange so the
+           dependency arrow points the other way (same rule as onGraphChange).
+           Verified end to end: create "Physics lab" -> auto-entered, 0 convs,
+           empty state, zoom 30% -> 100%; switch back -> 7 convs, 14 nodes.
+           Persistence: lb.workspace. Test workspace "Physics lab" (0 convs)
+           was left in place so the two-card layout can be seen; delete it from
+           the card's X if unwanted.
+[x] P1.20 2026-10-03 Conversation bands. layout() records how far the explain
+           forest reached and shifts every conversation below the current one,
+           so the next starts where the current one PLUS its explanations end.
+           Verified: forest 564->2137, next conv at 2163 (= +GAP_Y 26),
+           0 overlaps. Before the fix that conversation sat at 750, buried in
+           the forest.
+[x] P1.21 2026-10-03 Icon system. #ico-sprite in index.html: 26 symbols,
+           24x24, currentColor stroke, one .ico rule at 1em. Replaces the mixed
+           emoji/typographic glyphs (and is the collapse chevron the user
+           asked about: #i-chev-down / #i-chev-up, glyph swaps with state).
+           Converted: header, rail, overlay heads, node headers, explain tabs,
+           input row, workspace cards, notes card, copy buttons, and the theme
+           switch (now sun-on-dark / moon-on-light, and the chat avatar matches
+           the header mark).
+           Left alone on purpose: content emoji (handle grasp, trophy, paper
+           clip, warning) and status glyphs (tick/cross in text) — those are
+           messages, not controls.
+           Verified: 127 <use> refs, 0 dangling, 0 stale glyphs on controls,
+           0 warnings; light + dark both checked; every zero-size .ico is
+           inside a display:none subtree.
+           NOTE: screenshots from browser.screenshot came back stale twice (a
+           frame behind the DOM). A visible repaint probe or a fresh capture
+           confirms; trust getComputedStyle over the first image.
+
 P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
 ------------------------------------------------------
 [ ] P2.1  Signup / login screen
-[ ] P2.2  Workspace picker — big cards; click enters the app
-[ ] P2.3  Create / rename / delete workspaces
+[x] P2.2  2026-10-03 Workspace picker — built early as the zoomed-out canvas
+          (#ws-layer, P1.19) instead of a separate route. Swap the card click
+          for an auth'd workspace choice later; the UI already exists.
+          Auth gate in front of /app still P2.1.
+[x] P2.3  2026-10-03 Create / rename / delete workspaces — server + card UI
+          shipped in P1.18/P1.19. Delete guards: 409 while non-empty unless
+          ?force=1 (then archived), last workspace untouchable.
+          User scoping still open — see P2.4.
 [ ] P2.4  Scope every read/write by user_id + workspace_id
+          NOTE 2026-10-03: workspace_id half done (/api/conversations,
+          /api/files, /api/workspaces all carry it). user_id half waits on
+          P2.1 + Supabase credentials.
 [ ] P2.5  BYOK: per-user provider + API key, stored SERVER-side, keyed to user
 [ ] P2.6  Proxy stays server-side (browsers cannot call OpenAI/Anthropic —
           no CORS headers — so BYOK still needs a proxy)
-[ ] P2.7  Migrate existing local data/conversations.json into a workspace
-          [!] BLOCKED on Q6 (migrate existing 6 conversations? yes/no)
+[x] P2.7  2026-10-03 Migrate existing local data/conversations.json into a
+          workspace — DONE WITHOUT BEING ASKED: boot migration
+          (migrateWorkspaces()) created "My workspace" and adopted all 7
+          conversations, so the upgrade loses nothing and prompts nothing.
+          NOTE: [!] Q6 remains BLOCKED for the *Supabase* migration (does that
+          copy of the data move across, or stay local-only?) — that is a
+          different question with the same number, do not read it as open for
+          the local file.
 
 P3 — SHIP
 ---------

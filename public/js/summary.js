@@ -489,17 +489,22 @@ export function renderTestSection() {
   const hasContent =
     state.messages.length > 0 || Object.keys(state.explains.nodes).length > 0;
   const body = ready
-    ? html`<button type="button" id="take-test-btn">${`📝 Take a test (${
-        quiz.questions.length
-      } question${quiz.questions.length === 1 ? '' : 's'})`}</button>`
+    ? html`<button type="button" id="take-test-btn"
+        ><svg class="ico" aria-hidden="true"><use href="#i-clipboard"></use></svg> Take a test (${
+          quiz.questions.length
+        } question${quiz.questions.length === 1 ? '' : 's'})</button
+      >`
     : preparing
       ? html`<span class="test-wait">⏳ Preparing your test…</span>`
       : hasContent
-        ? html`<span class="test-wait">No test yet — press ↻ to generate one.</span>`
+        ? html`<span class="test-wait">No test yet — use the refresh button in the header to generate one.</span>`
         : html`<span class="test-wait">Chat or explain something to unlock a test.</span>`;
   render(
     html`<div class="test-card">
-      <div class="test-card-head">📝 Test your knowledge</div>
+      <div class="test-card-head">
+        <svg class="ico" aria-hidden="true"><use href="#i-clipboard"></use></svg> Test your
+        knowledge
+      </div>
       <div class="test-cta">${body}</div>
     </div>`,
     testSection

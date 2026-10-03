@@ -14,6 +14,11 @@ const KEY = 'lb.theme';
 const root = document.documentElement;
 const btn = document.getElementById('theme-toggle');
 
+/* The switch shows what you get when you press it: a sun on dark, a moon on
+ * light — both from the same sprite as every other control. */
+const glyph = (name) =>
+  `<svg class="ico" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
+
 function systemTheme() {
   return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
     ? 'light' : 'dark';
@@ -30,7 +35,7 @@ function stored() {
 function paint(t) {
   root.setAttribute('data-theme', t);
   if (!btn) return;
-  btn.textContent = t === 'dark' ? '🌙' : '☀️';
+  btn.innerHTML = t === 'dark' ? glyph('sun') : glyph('moon');
   btn.title = t === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme';
   btn.setAttribute('aria-pressed', t === 'light' ? 'true' : 'false');
 }
