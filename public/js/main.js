@@ -19,6 +19,7 @@ import './quiz.js';
 import { renderMessages } from './chat.js';
 import { loadConversations, selectConversation } from './conversations.js';
 import { updateCollapsed } from './explain-ui.js';
+import { initGraph } from './graph.js';
 import { updateToolbarDensity } from './overlays.js';
 import { loadModels, loadSettings } from './settings.js';
 import { input, state } from './state.js';
@@ -26,6 +27,9 @@ import { input, state } from './state.js';
 /* ================= Init ================= */
 
 export async function init() {
+  // Before the loads below: if the graph view is remembered, its rebuild hook
+  // has to be in place while conversations and explanations arrive.
+  initGraph();
   await loadSettings();
   await loadModels();
   await loadConversations();

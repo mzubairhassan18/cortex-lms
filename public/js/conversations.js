@@ -46,6 +46,7 @@ export function renderConversationList() {
       : html`<div class="empty">No conversations yet</div>`,
     convList
   );
+  if (state.onGraphChange) state.onGraphChange();
 }
 
 export async function selectConversation(id) {

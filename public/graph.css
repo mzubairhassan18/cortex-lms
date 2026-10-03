@@ -1,0 +1,309 @@
+/* =========================================================================
+   graph.css — the n8n-style horizontal node view (v2).
+
+   This file only styles the graph shell and its nodes. It deliberately does
+   NOT restyle the chat or explain containers: those elements are MOVED into
+   graph nodes unchanged, so their existing rules in style.css keep applying.
+
+   Two things make that safe:
+     1. `#explain-panels > .ex-container { display: none }` only matches a
+        DIRECT child of #explain-panels. Once an explain container is moved
+        into a node it is no longer a direct child, so it becomes visible
+        without touching its classes.
+     2. #chat-area is a flex box; the node that hosts it simply gives it a
+        definite width/height and it lays out exactly as it does in list view.
+   ========================================================================= */
+
+/* ------------------------- mode switches ------------------------- */
+
+/* In graph mode the left rail and the splitter are redundant: the
+   conversation list IS the column of nodes, and nothing is resizable. */
+body.graph-mode #left-sidebar,
+body.graph-mode #resize-handle { display: none; }
+
+/* The right sidebar holds the Library/Settings/Summary overlays. It must stay
+   reachable, but it should float over the canvas instead of squeezing it. */
+body.graph-mode #main-row { position: relative; }
+body.graph-mode #right-sidebar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  box-shadow: -14px 0 34px rgba(0, 0, 0, 0.35);
+}
+
+/* Explain containers live as nodes in this mode, so their tab strip and
+   panel column would just be an empty shell. */
+body.graph-mode #explain-panels { display: none; }
+
+/* The summary overlay relocates into a graph node; inside it the overlay must
+   flow like a normal panel instead of absolutely covering its parent. */
+body.graph-mode .summary-node #summary-overlay {
+  position: static;
+  inset: auto;
+  flex: 1;
+  min-height: 0;
+  background: transparent;
+  border-left: none;
+  z-index: auto;
+  box-shadow: none;
+}
+
+/* ------------------------- shell ------------------------- */
+
+#graph-view {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+#graph-view.hidden { display: none; }
+
+#graph-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 28px 36px 40px;
+}
+
+/* Sized in JS to the measured bounding box of every node, plus padding. */
+#graph-canvas {
+  position: relative;
+}
+
+#graph-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+#graph-edges .gpath {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#graph-edges .gpath-on { stroke: var(--accent); }
+
+/* Arrowheads are filled shapes — keep them out of the .gpath rule above. */
+#graph-edges marker path { fill: var(--border); stroke: none; }
+#graph-edges marker#garrow-on path { fill: var(--accent); }
+
+#graph-nodes {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+/* Bottom-left floating rail — Settings stays exactly where the spec wants it. */
+#graph-rail {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 40;
+  display: flex;
+  gap: 8px;
+}
+
+#graph-rail button {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 17px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  transition: color 0.12s, border-color 0.12s;
+}
+#graph-rail button:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ------------------------- node base ------------------------- */
+
+.gnode {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  overflow: hidden;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+  transition: border-color 0.14s, box-shadow 0.14s;
+}
+
+.gnode.is-current { border-color: var(--accent); }
+.gnode:hover { box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36); }
+
+/* Node header — clickable, collapses the node back to a chip. */
+.gn-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  min-width: 0;
+}
+
+.gn-icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.gn-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gn-acts { flex: none; display: flex; gap: 4px; }
+
+.gn-act {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+}
+.gn-act:hover { color: var(--accent); border-color: var(--border); background: var(--bg-panel); }
+.gn-act.on { color: var(--accent); border-color: var(--accent); }
+
+/* One-line preview shown only while collapsed. */
+.gn-preview {
+  flex: none;
+  padding: 9px 11px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.gn-meta {
+  flex: none;
+  padding: 0 11px 9px;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.75;
+}
+
+/* Body that hosts MOVED foreign DOM. Only shown when the node is expanded. */
+.gn-host { flex: 1; min-height: 0; display: none; }
+.gnode.expanded > .gn-host { display: flex; flex-direction: column; }
+
+/* Parked containers default to content height; in a node they must claim the
+   whole box so the message list, not the card, is what scrolls. */
+.gn-host > .ex-container { flex: 1; min-height: 0; }
+
+/* An expanded explanation shows the container's OWN header (quote, badge,
+   busy dot, ✕) as its title bar — ours would stack on top of it. */
+.gnode.explain-node.expanded > .gn-head,
+.gnode.explain-node.expanded > .gn-preview,
+.gnode.explain-node.expanded > .gn-meta { display: none; }
+
+/* An expanded conversation keeps its header (title + fold control) but drops
+   the two hint lines the chat area now fills. */
+.gnode.conv-node.expanded > .gn-preview,
+.gnode.conv-node.expanded > .gn-meta { display: none; }
+
+/* Collapsed explain containers: hide the whole panel, show only our header.
+   The container stays in the DOM so streaming and handlers keep working. */
+.gnode.explain-node.collapsed .ex-container { display: none; }
+
+/* While an explain container is lifted out of a parent split, the pane and
+   divider it left behind are empty — drop them so the parent renders clean. */
+body.graph-mode .ex-pane.ex-child:empty { display: none; }
+body.graph-mode .ex-vdiv:has(+ .ex-pane.ex-child:empty) { display: none; }
+
+/* ------------------------- conversation nodes ------------------------- */
+
+.gnode.conv-node { cursor: pointer; }
+
+.gnode.conv-node .gn-host #chat-area {
+  flex: 1;
+  min-height: 0;
+  width: auto;
+}
+
+/* Keep the composer reachable: the messages list scrolls, the box stays put. */
+.gnode.conv-node.expanded #messages { min-height: 0; }
+
+/* ------------------------- summary node ------------------------- */
+
+/* Its own .summary-head (↻ / ✕) is the header, exactly as in list view. */
+.gnode.summary-node { background: var(--bg-alt); }
+.gnode.summary-node > .gn-host { overflow: hidden; }
+
+/* ------------------------- new-chat plus node ------------------------- */
+
+.gnode.add-node {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 24px;
+  cursor: pointer;
+  border-style: dashed;
+  z-index: 2;
+}
+.gnode.add-node:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ------------------------- hint when empty ------------------------- */
+
+#graph-empty {
+  position: absolute;
+  left: 50%;
+  top: 140px;
+  z-index: 2;
+  transform: translateX(-50%);
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  max-width: 380px;
+  line-height: 1.6;
+}
+#graph-empty.hidden { display: none; }
+#graph-empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+
+/* Which layout am I in? */#view-toggle.on {
+  color: var(--accent);
+  border-color: var(--accent);
+}

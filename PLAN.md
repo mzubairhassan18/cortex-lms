@@ -80,31 +80,70 @@ Everything else (chat, explain, summary, quiz, notes, library, files) is
 - Header otherwise unchanged (plus the toggle).
 - Background gets a **texture**.
 
-### 2.2 Approach
+### 2.2 Approach — **IMPLEMENTED 2026-10-03**
 
-- **Custom SVG + Preact** (default). Layered tree layout is ~150 lines:
-  x = depth × column, y = leaves packed in order, arrows as straight
-  horizontal segments with a small elbow when y differs.
-  - `graph/layout.js` — pure function: `{nodes, edges}` + sizes → coordinates
-  - `graph/graph.js` — Preact view + SVG arrow layer
-  - `graph/node.js` — node card; expanded state reuses the existing container
-- Reasons: no build step stays, no framework migration, no new dependency,
-  full control over the collapse-on-scroll rule.
-- **Cost:** we don't get React Flow's pan/zoom/ports for free. If drag-to-move
-  nodes and free-form edges become a requirement, that is the point where
-  switching to React + React Flow is justified. **(→ question Q1)**
+Two files, no new dependency, no build step:
 
-### 2.3 Acceptance
+- **`public/js/graph.js`** — model, layout, nodes, arrows, interactions.
+- **`public/graph.css`** — node cards + mode switches only.
 
-- [ ] Toggle switches views and survives reload
-- [ ] Horizontal tree, vertical scroll, no layout thrash at 50+ nodes
-- [ ] `+` → arrow → node for explanations, nested at any depth
-- [ ] Conversation node expands into the *real* chat container (send works)
-- [ ] Summary node reproduces the panel content
-- [ ] New-chat `+` gives a working, typable empty node
-- [ ] Ask-explain from selection draws the arrow and adds the node
-- [ ] Off-screen explanation nodes collapse; conversation nodes stay reachable
-- [ ] Settings reachable bottom-left; library still the sidebar overlay
+**Why not the three-file Preact plan in the original draft:** a graph node is
+an empty box that **hosts live DOM**, and Preact must not own a subtree it did
+not render. So the node layer is imperative and every node element is created
+once and **reused** across renders. The one thing that *is* Preact (the
+conversation list) drives the rebuild through a hook instead.
+
+```
+#chat-area              ->  current conversation's node .gn-host
+.ex-container[data-id]  ->  that explanation's node   .gn-host
+#summary-overlay        ->  the summary node          .gn-host
+```
+
+`moved` is a LIFO journal of where each element came from, so leaving the
+graph view restores the app exactly. Node elements are keyed and reused, so a
+re-render is position/class writes only — **no focus loss, no scroll jump,
+no re-binding while streaming**.
+
+**Layout** is a pure function of the model (fixed node heights → no measure
+pass): column 0 is a plain vertical stack (summary, `+`, conversations, `+`);
+explanations are a forest anchored to the current conversation, laid out
+leaves-first so each parent sits centred on its children. Arrows are
+`M x1 y1 H mid V y2 H x2` with an SVG marker arrowhead.
+
+**Integration without a cycle:** nothing imports `graph.js`. The conversation
+and explain modules call `state.onGraphChange()` after they change; graph.js
+sets it while mounted and clears it on exit. Overlay visibility is mirrored by
+a `MutationObserver` rather than by calling into `overlays.js`.
+
+**Consequences for other files (all required, all small):**
+- `interactions.js` — the 5 delegated explain handlers are now named functions
+  behind `attachExplainHandlers(host)`, registered on `#explain-panels` *and*
+  on the graph node layer. One body, two hosts.
+- `selection.js` — `makeSelectionHandlers(graphNodes, …)` so text selected
+  inside a parked container still spawns a child explanation.
+- `explain-ui.js` — `showSidebar(force)`: overlays pass `force`, explanations
+  do not (they are nodes here). `updateCollapsed()` no-ops in graph mode.
+- `explain-lifecycle.js` — closing/clearing removes containers **by reference**
+  instead of `explainPanels.innerHTML = ''`, which would leak parked ones.
+
+- **Cost:** no React Flow pan/zoom/ports. If drag-to-move nodes and free-form
+  edges become a requirement, that is the point where React + React Flow is
+  justified. **(Q1 — answered: build it ourselves)**
+
+### 2.3 Acceptance — **ALL VERIFIED in-browser 2026-10-03**
+
+- [x] Toggle switches views and survives reload
+- [x] Horizontal tree, vertical scroll, arrows as straight/elbow segments
+- [x] `+` → arrow → node for explanations, nested at any depth (2 levels tested)
+- [x] Conversation node expands into the *real* chat container (send works)
+- [x] Summary node reproduces the panel content (↻/ ✕ work, returns to mount)
+- [x] New-chat `+` gives a working, typable empty node
+- [x] Ask-explain from selection draws the arrow and adds the node
+- [x] Off-screen explanation nodes collapse on scroll (140px slack; never
+      re-opens on its own, so it cannot fight the user)
+- [x] Settings reachable bottom-left; library still the sidebar overlay
+- [x] Round-trip list → graph → list restores containers in creation order
+      with zero lost elements and zero console warnings
 
 ---
 
@@ -185,13 +224,13 @@ Route: `/` (public landing) → `/login` → `/workspaces` → `/app`.
 ## 6. Phases
 
 **P1 — UI (no infra risk, no data migration, fully local)**
-1. View toggle + graph skeleton (layout + SVG arrows)
-2. Conversation node → real chat container
-3. Explanation `+` → arrow → node, nested
-4. Summary node; new-chat `+`; Ask-explain arrow
-5. Collapse-on-scroll
-6. Themes (light/dark) + textured background
-7. Landing page
+1. [x] View toggle + graph skeleton (layout + SVG arrows)
+2. [x] Conversation node → real chat container
+3. [x] Explanation `+` → arrow → node, nested
+4. [x] Summary node; new-chat `+`; Ask-explain arrow
+5. [x] Collapse-on-scroll
+6. [ ] Themes (light/dark) + textured background
+7. [ ] Landing page
 
 **P2 — Identity**
 8. Auth (signup/login)
@@ -210,14 +249,14 @@ Route: `/` (public landing) → `/login` → `/workspaces` → `/app`.
 
 | ID | Question | Status |
 | -- | -------- | ------ |
-| Q1 | Build the graph ourselves (Preact + SVG) or migrate to React for React Flow? | **open** |
-| Q2 | Hosting path A (Express + free PaaS) vs B (Supabase serverless)? | **open** |
-| Q3 | Phase order — P1 UI first, or auth/workspaces first? | **open** |
-| Q4 | Auth provider: Supabase Auth vs self-rolled? | **open** |
-| Q5 | Drizzle yes/no + state-lib yes/no | **recommend: both no** |
-| Q6 | Migrate the existing 6 local conversations into a workspace? | **open** |
+| Q1 | Build the graph ourselves (Preact + SVG) or migrate to React for React Flow? | **resolved 2026-10-03 — build it ourselves** (see §2.2; shipped, no drag/ports needed yet) |
+| Q2 | Hosting path A (Express + free PaaS) vs B (Supabase serverless)? | **open** (P3; recommendation A in §4) |
+| Q3 | Phase order — P1 UI first, or auth/workspaces first? | **resolved 2026-10-03 — P1 first** (user: local full working demo, then Supabase creds) |
+| Q4 | Auth provider: Supabase Auth vs self-rolled? | **open** (P2) |
+| Q5 | Drizzle yes/no + state-lib yes/no | **resolved: both no** |
+| Q6 | Migrate the existing 6 local conversations into a workspace? | **open** (P2) |
 | Q7 | "encapsulate under user preferences, no sidebar route, just give a link" — what is this? | **open** |
-| Q8 | Graph view: does it *replace* the list view or coexist forever? | **open (brief says toggle)** |
+| Q8 | Graph view: does it *replace* the list view or coexist forever? | **resolved 2026-10-03 — coexist behind the header toggle** (brief: "list view ⇄ graph view") |
 
 ---
 
@@ -228,3 +267,10 @@ Route: `/` (public landing) → `/login` → `/workspaces` → `/app`.
 | 2026-10-03 | Commit everything as `a1d501b converted to preact` before starting. |
 | 2026-10-03 | Keep Preact for now; revisit only if graph needs React Flow. |
 | 2026-10-03 | Defer hosting (P3) so P1/P2 are never blocked. |
+| 2026-10-03 | **Graph = two files (`js/graph.js` + `graph.css`), imperative node layer.** Preact must not own DOM it did not render, so nodes are empty boxes and live elements are *moved* into them, journaled in a LIFO `moved` list for exact restore. Details in §2.2. |
+| 2026-10-03 | **No import cycle:** nothing imports `graph.js`. Other modules call `state.onGraphChange()`; overlays are mirrored by a `MutationObserver`. |
+| 2026-10-03 | **Node elements are created once and reused**, so a graph re-render only writes positions/classes — no focus/scroll loss, safe during streaming. |
+| 2026-10-03 | Layout is a **pure function** (fixed node heights ⇒ no measure pass). |
+| 2026-10-03 | `interactions.js` delegated handlers extracted behind `attachExplainHandlers(host)` — one body, two hosts (`#explain-panels` and the node layer). |
+| 2026-10-03 | `showSidebar(force)`: Library/Settings force it open in graph mode; explanation creation does not (explanations are nodes). |
+| 2026-10-03 | Scroll-collapse **never re-opens on its own** (140px slack) so it cannot fight the user. |

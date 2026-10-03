@@ -24,6 +24,13 @@ export const state = {
     roots: [],   // root ids in creation order (these become the tabs)
     activeId: null,
   },
+  // View mode: the classic list layout, or the horizontal node graph.
+  // Persisted so the choice survives a reload.
+  view: localStorage.getItem('lb.view') === 'graph' ? 'graph' : 'list',
+  /* Set by graph.js while the node view is live, cleared when it unmounts.
+   * The conversation and explain modules call it after they change so the
+   * graph can rebuild — they never import graph.js, which would be a cycle. */
+  onGraphChange: null,
   leftOpen: true,
 
   // UI state for the summary overlay: collapsible card, active test, results.

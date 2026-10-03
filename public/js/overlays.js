@@ -28,6 +28,8 @@ summaryBtn.addEventListener('click', () => {
   if (panelHidden || overlayHidden) {
     settingsOverlay.classList.add('hidden'); // only one overlay at a time
     setSummaryOverlay(true);
+    /* No `force`: in graph mode the summary relocates into a node of its own,
+     * so there is nothing to reveal in the sidebar. */
     if (panelHidden) showSidebar(); // overlay lives over the containers
     showCachedSummary();
     runBackgroundJobs(state.currentId, state.messages, explainSnapshot(), false);
@@ -48,7 +50,7 @@ settingsBtn.addEventListener('click', () => {
   closeLibrary(false);
   const panelHidden = !state.sidebar.open;
   settingsOverlay.classList.remove('hidden');
-  if (panelHidden) showSidebar();
+  if (panelHidden) showSidebar(true);
   renderSettingsForm();
   setProvider.focus();
 });

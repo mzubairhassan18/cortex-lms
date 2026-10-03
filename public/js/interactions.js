@@ -18,29 +18,36 @@ input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
-/* ---------- Explainer container interactions (delegated) ---------- */
+/* ---------- Explainer container interactions (delegated) ----------
+ *
+ * These are registered below on #explain-panels (list view). The graph view
+ * relocates the very same containers into its nodes, where they are no longer
+ * descendants of #explain-panels — so it calls attachExplainHandlers() with
+ * its node layer instead. One handler body, two hosts, nothing can diverge. */
 
 /* Per-container input: submit / Enter. */
-explainPanels.addEventListener('submit', (e) => {
+function onExplainSubmit(e) {
   const form = e.target.closest('.ep-input-form');
   if (!form) return;
   e.preventDefault();
   sendExplain(form.closest('.ex-container'));
-});
-explainPanels.addEventListener('keydown', (e) => {
+}
+
+function onExplainKeydown(e) {
   if (!e.target.classList || !e.target.classList.contains('ep-input')) return;
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendExplain(e.target.closest('.ex-container'));
   }
-});
-explainPanels.addEventListener('input', (e) => {
+}
+
+function onExplainInput(e) {
   if (e.target.classList && e.target.classList.contains('ep-input')) autoResize(e.target);
-});
+}
 
 /* Child tabs (activate / close), header ✕ (close), collapsed pane (expand),
  * header click (activate). */
-explainPanels.addEventListener('click', (e) => {
+function onExplainClick(e) {
   // Highlighted source text (nested selections made inside this container)
   const mark = e.target.closest('mark.explain-src');
   if (mark && mark.dataset.id) {
@@ -78,10 +85,10 @@ explainPanels.addEventListener('click', (e) => {
     const c = head.closest('.ex-container');
     if (c) activateExplain(c.dataset.id);
   }
-});
+}
 
 /* Drag a vertical divider: the two adjacent panes resize (min = few pixels). */
-explainPanels.addEventListener('pointerdown', (e) => {
+function onExplainPointerdown(e) {
   if (e.button !== 0) return;
   const vd = e.target.closest('.ex-vdiv');
   if (!vd) return;
@@ -113,7 +120,18 @@ explainPanels.addEventListener('pointerdown', (e) => {
     updateCollapsed();
     persist();
   });
-});
+}
+
+/* Register the whole set of delegated explain handlers on one host element. */
+export function attachExplainHandlers(host) {
+  host.addEventListener('submit', onExplainSubmit);
+  host.addEventListener('keydown', onExplainKeydown);
+  host.addEventListener('input', onExplainInput);
+  host.addEventListener('click', onExplainClick);
+  host.addEventListener('pointerdown', onExplainPointerdown);
+}
+
+attachExplainHandlers(explainPanels);
 
 /* Clicking highlighted source text focuses its explainer container. */
 messagesEl.addEventListener('click', (e) => {

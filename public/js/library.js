@@ -22,7 +22,7 @@ libraryBtn.addEventListener('click', () => {
   setSummaryOverlay(false);
   settingsOverlay.classList.add('hidden');
   const panelHidden = !state.sidebar.open;
-  if (panelHidden) showSidebar(); // the overlay lives over the containers
+  if (panelHidden) showSidebar(true); // the overlay lives over the containers
   libraryOpenedPanel = panelHidden;
   libraryOverlay.classList.remove('hidden');
   libraryBtn.classList.add('on');

@@ -6,6 +6,7 @@
   <title>Learning Bot</title>
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="graph.css">
 </head>
 <body>
   <div id="app">
@@ -14,6 +15,7 @@
     <div id="top-bar">
       <button id="left-toggle" title="Toggle conversation list">☰</button>
       <span id="current-title">New conversation</span>
+      <button id="view-toggle" title="Switch between list view and graph view">🗺<span class="btn-label"> Graph</span></button>
       <button id="explains-toggle" class="hidden" title="Show explain windows">💡 <span class="btn-label">Explains</span> <span id="explains-count">0</span></button>
       <button id="summary-btn" title="Topics summary of this conversation">📋<span class="btn-label"> Summary</span></button>
       <button id="library-btn" title="Library — every file you uploaded">📚<span class="btn-label"> Library</span></button>
@@ -124,6 +126,34 @@
         </div>
       </div>
     </aside>
+
+    <section id="graph-view" class="hidden" aria-label="Graph view">
+      <div id="graph-scroll">
+        <div id="graph-canvas">
+          <svg id="graph-edges" aria-hidden="true">
+            <defs>
+              <marker id="garrow" viewBox="0 0 10 10" refX="8.5" refY="5"
+                      markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 Z"/>
+              </marker>
+              <marker id="garrow-on" viewBox="0 0 10 10" refX="8.5" refY="5"
+                      markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 Z"/>
+              </marker>
+            </defs>
+            <g id="graph-paths"></g>
+          </svg>
+          <div id="graph-nodes"></div>
+          <div id="graph-empty" class="hidden">
+            <b>Nothing here yet</b>
+            Start a chat — its explanations will branch off to the right.
+          </div>
+        </div>
+      </div>
+      <div id="graph-rail">
+        <button id="rail-settings" title="Provider & API settings">⚙</button>
+      </div>
+    </section>
 
     </div><!-- /#main-row -->
 

@@ -105,6 +105,11 @@ export function closeExplainWindow(id) {
   const doomed = subtreeIds(id);
   const activeDoomed = doomed.includes(state.explains.activeId);
 
+  /* Snapshot the DOM before the registry is torn down. A container may be
+   * parked inside a graph node rather than in its pane, so it has to be
+   * removed by reference — clearing the mount below would miss it. */
+  const doms = doomed.map((did) => ({ el: panelEl(did), pane: childPane(did) }));
+
   // Aborted streams end quietly (finishExplainStream sees the node is gone).
   for (const did of doomed) {
     const n = state.explains.nodes[did];
@@ -113,17 +118,16 @@ export function closeExplainWindow(id) {
     unregisterNode(did); // drop its DOM registry entries too
   }
 
-  if (!parentId) {
-    const rootEl = panelEl(id);
-    if (rootEl) rootEl.remove();
-    state.explains.roots = state.explains.roots.filter((r) => r !== id);
-  } else {
-    const pane = childPane(id);
+  for (const { el, pane } of doms) {
+    if (el) el.remove(); // wherever it currently lives
     if (pane) {
       const vdiv = pane.previousElementSibling; // this pane's divider
       if (vdiv && vdiv.classList.contains('ex-vdiv')) vdiv.remove();
       pane.remove();
     }
+  }
+  if (!parentId) {
+    state.explains.roots = state.explains.roots.filter((r) => r !== id);
   }
 
   if (state.explains.roots.length === 0) {
@@ -213,6 +217,13 @@ document.addEventListener('keydown', (e) => {
 export function clearExplainWindows() {
   for (const n of Object.values(state.explains.nodes)) {
     if (n.controller) n.controller.abort();
+  }
+  /* Remove each container by reference before the table is dropped: a
+   * container parked inside a graph node is not a descendant of the mount, so
+   * clearing its innerHTML below would leak it. */
+  for (const id of Object.keys(state.explains.nodes)) {
+    const el = panelEl(id);
+    if (el) el.remove();
   }
   state.explains.nodes = {};
   state.explains.roots = [];

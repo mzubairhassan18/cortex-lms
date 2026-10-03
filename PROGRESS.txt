@@ -29,26 +29,77 @@ BASELINE
 
 P1 — UI  (graph view, themes, landing page)
 -------------------------------------------
-[ ] P1.1  Header view toggle: list view <-> graph view, state persists on reload
-[ ] P1.2  graph/layout.js — horizontal tree layout (x=depth, y=leaf packing)
-[ ] P1.3  graph/graph.js — Preact graph view + SVG straight-arrow layer
-[ ] P1.4  Conversation node = compact card; click expands into REAL chat
-          container (chat box + send + attach +, reuse existing markup)
-[ ] P1.5  Explanation "+"/node affordance beside a conversation node
-[ ] P1.6  "+" draws straight arrow -> reveals explanation node
-[ ] P1.7  Nested explanations -> deeper nodes (tree, horizontal, any depth)
-[ ] P1.8  Summary node — large box reproducing the summary panel content,
-          opened from an icon/plus on the FIRST (conversation start) node
-[ ] P1.9  New chat: large "+" above first / below last node -> expands into a
-          typable, working empty conversation node
-[ ] P1.10 Select text -> Ask explain draws arrow + spawns explanation node
-[ ] P1.11 Collapse-on-scroll: off-screen explanation nodes shrink to compact
-          size so conversation nodes below stay reachable
-[ ] P1.12 Settings reachable from bottom-left in graph view
-[ ] P1.13 Library still opens as the sidebar overlay (no change)
+[x] P1.1  2026-10-03 Header view toggle: list <-> graph, persists in
+           localStorage['lb.view']. Button flips 🗺 Graph / 📋 List.
+[x] P1.2  2026-10-03 Tree layout — NOT a separate graph/layout.js: layout lives
+           in public/js/graph.js as a pure function (x = depth column, y =
+           leaves packed first so each parent centres on its children).
+           Column 0 = vertical stack (summary, +, conversations, +);
+           explanations = forest anchored to the current conversation node.
+           NOTE: file split from the plan was dropped — see PLAN.md 2.2.
+[x] P1.3  2026-10-03 graph view + SVG arrow layer. public/js/graph.js +
+           public/graph.css (2 files, no new dependency, no build step).
+           Arrows are `M x1 y1 H mid V y2 H x2` + marker arrowhead.
+           KEY: nodes are EMPTY BOXES that host live DOM (#chat-area,
+           .ex-container[data-id], #summary-overlay) journaled in a LIFO
+           `moved` list, so exiting the graph restores the app exactly.
+           Nodes are created once and REUSED -> no focus/scroll loss.
+[x] P1.4  2026-10-03 Conversation node = compact card; current one expands
+           into the REAL #chat-area (chat box, send, attach +, message list).
+           Verified: 778x617 host, input/send/attach visible, 10 messages.
+[x] P1.5  2026-10-03 Explanation node affordance on each conversation node
+           (💡 header, count badge, expand/collapse; expanded = container's own
+           .ex-head becomes the header).
+[x] P1.6  2026-10-03 "+" -> straight/elbow arrow -> explanation node.
+           Verified arrow `M 780 394 H 825 V 116 H 870`.
+[x] P1.7  2026-10-03 Nested explanations -> deeper nodes (depth 2 verified,
+           2 arrows, canvas widens 1000 -> 1776).
+[x] P1.8  2026-10-03 Summary node — whole #summary-overlay moves into a large
+           node (680x560), its own .summary-head ↻/✕ is the header.
+           #summary-btn is NOT intercepted: a MutationObserver mirrors
+           .hidden and re-renders. Closing returns it to #explainer-body.
+[x] P1.9  2026-10-03 New chat: "+" add-nodes stacked above/below in column 0.
+           Click -> 7th conversation, current+expanded, explains cleared.
+[x] P1.10 2026-10-03 Select text -> Ask explain draws the arrow and spawns the
+           node. makeSelectionHandlers(graphNodes, ...) resolves the containing
+           .ex-container so selections inside a parked container still work.
+[x] P1.11 2026-10-03 Collapse-on-scroll: explanations fold when they scroll
+           140px above the viewport; never re-open on their own.
+           Verified (320px viewport): expanded -> collapsed=true.
+[x] P1.12 2026-10-03 Settings reachable from bottom-left; opens the sidebar as
+           an overlay. NEW: closing it now closes the (otherwise empty) sidebar
+           too — an overlay MutationObserver watches
+           #settings-overlay / #library-overlay / #summary-overlay.
+[x] P1.13 2026-10-03 Library still opens as the sidebar overlay (force-opened
+           via showSidebar(true)).
+           Also verified this pass: full list-mode regression (switch conv,
+           10 messages, ep-input autoResize, Enter -> real explain follow-up
+           send, summary, library) — 0 console warnings.
 [ ] P1.14 Textured background
 [ ] P1.15 Theme system: light + dark, user-switchable, persists
 [ ] P1.16 Landing page at "/" (marketing copy, see research note above)
+
+GRAPH VIEW — IMPLEMENTATION NOTES (read before touching graph.js)
+------------------------------------------------------------------
+2026-10-03  Files: public/js/graph.js + public/graph.css. Entry: initGraph()
+            is the FIRST call in main.js init(). Hooks: state.view,
+            state.onGraphChange (set on enter, cleared on exit).
+- Node elements are keyed and REUSED across renders; re-render = position and
+  class writes only. NEVER replace a node's innerHTML — it holds live DOM.
+- `moved` is a LIFO journal [{el, parent, next, display}]; restore pops it in
+  reverse so the app is byte-identical after leaving the graph view.
+- NO MODULE MAY IMPORT graph.js (cycle). To tell the graph something changed,
+  call state.onGraphChange() (conversations.js, explain-ui.js already do).
+- Overlay sync: a MutationObserver mirrors #summary-overlay / #settings-overlay
+  / #library-overlay `class` -> summary becomes a node, and the sidebar opens
+  ONLY while an overlay that lives inside it (settings/library) is showing.
+- Delegated explain handlers live in interactions.js as named functions behind
+  attachExplainHandlers(host); graph mode registers them on #graph-nodes too.
+- Fixed node sizes (DIM) keep layout a pure function — no measure pass. If a
+  node's content ever needs to drive its size, that assumption breaks.
+- Test data discipline: manual UI tests created 2 explanations and one
+  "New conversation"; both were removed before the P1.1–P1.13 commit.
+  Baseline data = 6 conversations, 10 messages on the active one, 0 explains.
 
 P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
 ------------------------------------------------------
@@ -71,16 +122,20 @@ P3 — SHIP
 
 OPEN QUESTIONS (see PLAN.md section 7)
 --------------------------------------
-[!] Q1  Graph: build in Preact+SVG, or migrate to React for React Flow?
-[!] Q2  Hosting path A vs B
-[!] Q3  Phase order — P1 first or auth/workspaces first?
-[!] Q4  Auth: Supabase Auth vs self-rolled?
-[!] Q5  Drizzle + state-lib — recommendation is BOTH NO (plain JS, no build step;
-        @preact/signals only if state actually gets painful)
-[!] Q6  Migrate the existing 6 local conversations?
+[x] Q1  2026-10-03 Graph: build in Preact+SVG, or migrate to React for React
+        Flow? -> BUILD OURSELVES. Shipped in graph.js/graph.css, no new dep.
+        Revisit only if we ever need drag-to-move nodes / free-form ports.
+[!] Q2  Hosting path A vs B  (P3; recommendation is A — keeps server.js)
+[x] Q3  2026-10-03 Phase order -> P1 FIRST. User: local full working demo,
+        then Supabase credentials arrive (possibly via MCP) for auth/hosting.
+[!] Q4  Auth: Supabase Auth vs self-rolled?  (P2)
+[x] Q5  Drizzle + state-lib -> BOTH NO. Plain JS, no build step; state.js +
+        explicit Preact renders; @preact/signals only if state gets painful.
+[!] Q6  Migrate the existing 6 local conversations?  (P2)
 [!] Q7  "encapsulate under user preferences, no sidebar route, just give a
         link" — meaning unclear, needs clarification
-[!] Q8  Graph view coexists with list view forever? (brief says toggle)
+[x] Q8  2026-10-03 Graph view coexists with list view behind the header toggle
+        (the brief literally says "list view <-> graph view").
 
 DONE SO FAR (v1 — all shipped)
 ------------------------------

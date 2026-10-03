@@ -182,6 +182,7 @@ export function updateExplainToggle() {
   explainsCount.textContent = String(count);
   explainsToggle.classList.toggle('hidden', count === 0);
   explainsToggle.classList.toggle('on', state.sidebar.open);
+  if (state.onGraphChange) state.onGraphChange();
 }
 
 export function activeRootId() {
@@ -206,6 +207,13 @@ export function updateRootVisibility() {
  * Measured from real widths (flex handles the distribution).
  */
 export function updateCollapsed() {
+  /*
+   * In the graph view panes and the chat area are not flex siblings of a
+   * splitter — most of them are parked inside nodes with a fixed box, so they
+   * measure 0 or a hard-coded width. Judging them here would stamp
+   * `.collapsed` on a pane whose content is perfectly visible.
+   */
+  if (state.view === 'graph') return;
   const open = state.sidebar.open;
   const panes = explainPanels.querySelectorAll('.ex-pane');
   // Measure EVERYTHING first, then apply the classes. Interleaving reads and
@@ -297,7 +305,14 @@ export function activateExplain(id, persistIt = true) {
   if (persistIt) persist();
 }
 
-export function showSidebar() {
+/*
+ * Opening the panel. `force` is for the overlays that genuinely live inside
+ * it (Library / Summary / Settings): they must be reachable from the graph
+ * view too. Explain containers do NOT pass it — in the graph view they are
+ * nodes on the canvas, so pulling the sidebar open would just reveal a shell.
+ */
+export function showSidebar(force) {
+  if (state.view === 'graph' && !force) return;
   state.sidebar.open = true;
   rightSidebar.classList.add('open');
   rightSidebar.style.width = `${state.sidebar.width}px`;
