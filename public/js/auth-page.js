@@ -4,9 +4,13 @@
  * One document serves both routes: server.js maps /login and /signup to
  * auth.html and the mode comes from location.pathname, so the two never drift.
  */
+import { at, route } from './base.js';
 import { client, safeNext, providerEnabled } from './auth.js';
 
-const path = location.pathname.replace(/\/+$/, '');
+/* route() strips the deploy base, so /<repo>/signup and /signup both read as
+ * '/signup'. Comparing location.pathname directly would flip this page into
+ * "login" mode the moment the site is served from a sub-path. */
+const path = route();
 const isSignup = path === '/signup';
 const next = safeNext('/app');
 
@@ -48,13 +52,13 @@ if (isSignup) {
   sub.textContent = 'Free forever for up to 50 questions a day. No card, no password.';
   googleLabel.textContent = 'Sign up with Google';
   emailBtn.textContent = 'Email me a sign-up link';
-  switchEl.innerHTML = 'Already have an account? <a href="/login">Sign in</a>';
+  switchEl.innerHTML = `Already have an account? <a href="${at('login')}">Sign in</a>`;
 } else {
   title.textContent = 'Sign in to Cortex';
   sub.textContent = 'Pick up where you left off — your workspaces, notes and explanations are waiting.';
   googleLabel.textContent = 'Continue with Google';
   emailBtn.textContent = 'Send me a sign-in link';
-  switchEl.innerHTML = 'New here? <a href="/signup">Create an account</a>';
+  switchEl.innerHTML = `New here? <a href="${at('signup')}">Create an account</a>`;
 }
 
 /* ---------- is Google actually switched on? ---------- */
@@ -104,12 +108,12 @@ if (isSignup && (wantedPlan === 'pro' || wantedPlan === 'team')) {
     'charged automatically.';
 }
 
-if (await currentSession()) location.replace(next);
+if (await currentSession()) location.replace(at(next));
 
 /* Supabase appends tokens to the URL after an OAuth or magic-link redirect;
    the client parses them, fires SIGNED_IN, and we continue. */
 client.auth.onAuthStateChange((_event, session) => {
-  if (session) location.replace(next);
+  if (session) location.replace(at(next));
 });
 
 /* ---------- Google ---------- */

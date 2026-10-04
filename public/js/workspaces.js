@@ -8,6 +8,7 @@
  * but NEVER graph.js — the graph publishes `state.zoomTo` / `state.onZoomChange`
  * so the arrow points the other way. Same rule as state.onGraphChange.
  */
+import { at } from './base.js';
 import { explainSnapshot, persistNow } from './chat.js';
 import {
   loadConversations,
@@ -315,7 +316,7 @@ function renderSwitchMenu() {
         </button>`
       )}
       <div class="ws-menu-sep" role="separator"></div>
-      <a class="ws-menu-item all" href="/workspaces" role="menuitem">
+      <a class="ws-menu-item all" href="${at('workspaces')}" role="menuitem">
         <svg class="ico" aria-hidden="true"><use href="#i-grid"></use></svg>
         <span class="ws-menu-name">All workspaces</span>
       </a>

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cortex — sign in</title>
   <meta name="description" content="Sign in to Cortex with Google or an email link.">
-  <link rel="icon" type="image/svg+xml" href="/icon.svg">
-  <link rel="stylesheet" href="/landing.css">
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <link rel="stylesheet" href="./landing.css">
   <script>
     /* Same key and same no-flash trick as the app and the landing page. */
     (function () {
@@ -114,8 +114,8 @@
 <div class="auth-wrap">
 
   <header class="auth-top">
-    <a class="brand" href="/"><span class="brand-mark">🧠</span> Cortex</a>
-    <a class="btn btn-ghost" href="/">Back to site</a>
+    <a class="brand" href="./"><span class="brand-mark">🧠</span> Cortex</a>
+    <a class="btn btn-ghost" href="./">Back to site</a>
   </header>
 
   <!-- mode is set from /login vs /signup by auth-page.js -->
@@ -157,13 +157,13 @@
   </main>
 
   <footer class="auth-foot">
-    <a href="/">Cortex</a> · free tier, no card required
+    <a href="./">Cortex</a> · free tier, no card required
   </footer>
 </div>
 
 <!-- Classic script (like marked.min.js): runs before the module graph loads,
      so window.supabase is ready when auth-page.js executes. -->
-<script src="/vendor/supabase.js"></script>
-<script type="module" src="/js/auth-page.js"></script>
+<script src="./vendor/supabase.js"></script>
+<script type="module" src="./js/auth-page.js"></script>
 </body>
 </html>

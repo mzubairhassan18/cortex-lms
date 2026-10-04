@@ -7,6 +7,8 @@
  * initWorkspacePage() instead of init().
  */
 
+import { at } from './base.js';
+
 const $ = (id) => document.getElementById(id);
 
 const page      = $('ws-page');
@@ -84,7 +86,7 @@ async function remove(w) {
 
 function open(id) {
   try { localStorage.setItem('lb.workspace', id); } catch { /* private mode */ }
-  location.href = '/app';
+  location.href = at('app');
 }
 
 /* ---------------- render ---------------- */

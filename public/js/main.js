@@ -1,4 +1,5 @@
 /* main.js — split from public/app.js (app.js line 3659-3675). */
+import { route } from './base.js';
 import './markdown.js';
 import './stream.js';
 import './chat.js';
@@ -74,7 +75,7 @@ export async function init() {
      * shell. Branch before anything else is wired up — that screen has no
      * sidebar, chat or graph, so booting them would race against an empty page.
      */
-    if (location.pathname.replace(/\/+$/, '') === '/workspaces') {
+    if (route() === '/workspaces') {
       await initWorkspacePage();
       return;
     }

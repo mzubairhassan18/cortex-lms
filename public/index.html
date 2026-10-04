@@ -6,9 +6,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cortex</title>
-  <link rel="icon" type="image/svg+xml" href="/icon.svg">
-  <link rel="stylesheet" href="/style.css">
-  <link rel="stylesheet" href="/graph.css">
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./graph.css">
   <script>
     /* Set the theme before the stylesheet paints so there is no flash of the
      * wrong colours. Mirrored by js/theme.js — keep the storage key in sync. */
@@ -307,7 +307,7 @@
     just search, a grid/list toggle and the workspace names. Hidden on /app.
   -->
   <div id="ws-page" hidden>
-    <a id="ws-page-brand" href="/app" title="Back to Cortex">
+    <a id="ws-page-brand" href="./app" title="Back to Cortex">
       <svg class="ico" aria-hidden="true"><use href="#i-graph"></use></svg> Cortex
     </a>
 
@@ -352,10 +352,10 @@
     </div>
   </div>
 
-  <script src="/vendor/marked.min.js"></script>
+  <script src="./vendor/marked.min.js"></script>
   <!-- Supabase UMD bundle: a classic script, so it runs before the module
        graph is fetched and window.supabase is ready when js/auth.js loads. -->
-  <script src="/vendor/supabase.js"></script>
+  <script src="./vendor/supabase.js"></script>
   <!--
     @use-gesture is served unbundled (there is no build step), so its dev guards
     are still in place: every warning reads `process.env.NODE_ENV`. A bundler
@@ -366,22 +366,25 @@
   <script>window.process = window.process || { env: { NODE_ENV: 'production' } };</script>
   <!--
     The canvas gesture layer (@use-gesture: wheel-pan, pinch-zoom, pointer
-    tracking for the Figma-style board). There is deliberately no build step, so
-    the bare specifiers js/graph.js imports are resolved here and served from
-    node_modules by the /lib/use-gesture route in server.js. Import maps must
-    appear before the first module script.
+    tracking for the Figma-style board). There is deliberately no build step,
+    so the bare specifiers js/graph.js imports are resolved here. The targets
+    are vendored into vendor/use-gesture/ rather than read out of node_modules,
+    because the published site is a folder of static files with no npm install
+    behind it. Every URL in this document is relative for the same reason, so
+    the bytes still resolve when the page is served one level down on the
+    deployed site. Import maps must appear before the first module script.
   -->
   <script type="importmap">
   {
     "imports": {
-      "@use-gesture/vanilla": "/lib/use-gesture/vanilla/dist/use-gesture-vanilla.esm.js",
-      "@use-gesture/core": "/lib/use-gesture/core/dist/use-gesture-core.esm.js",
-      "@use-gesture/core/actions": "/lib/use-gesture/core/actions/dist/use-gesture-core-actions.esm.js",
-      "@use-gesture/core/utils": "/lib/use-gesture/core/utils/dist/use-gesture-core-utils.esm.js",
-      "@use-gesture/core/types": "/lib/use-gesture/core/types/dist/use-gesture-core-types.esm.js"
+      "@use-gesture/vanilla": "./vendor/use-gesture/vanilla/dist/use-gesture-vanilla.esm.js",
+      "@use-gesture/core": "./vendor/use-gesture/core/dist/use-gesture-core.esm.js",
+      "@use-gesture/core/actions": "./vendor/use-gesture/core/actions/dist/use-gesture-core-actions.esm.js",
+      "@use-gesture/core/utils": "./vendor/use-gesture/core/utils/dist/use-gesture-core-utils.esm.js",
+      "@use-gesture/core/types": "./vendor/use-gesture/core/types/dist/use-gesture-core-types.esm.js"
     }
   }
   </script>
-  <script type="module" src="/js/main.js"></script>
+  <script type="module" src="./js/main.js"></script>
 </body>
 </html>

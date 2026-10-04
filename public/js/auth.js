@@ -12,6 +12,8 @@
  * This is why the local-dev bypass below is safe: it cannot expose anyone's data.
  */
 
+import { BASE, at, rel } from './base.js';
+
 /* Project URL + publishable key. Both are public by design — the publishable
  * key is meant to ship in browser code and only carries anon-role privileges,
  * which RLS then narrows further. Never put the service_role key here. */
@@ -42,7 +44,11 @@ export function safeNext(fallback = '/app') {
   if (!raw) return fallback;
   try {
     const u = new URL(raw, location.origin);
-    return u.origin === location.origin ? u.pathname + u.search + u.hash : fallback;
+    if (u.origin !== location.origin) return fallback;
+    /* Keep the result app-relative. '/app' survives the site moving under
+     * /<repo>/, whereas an absolute path would carry the deploy base twice
+     * once at() re-applies it on the way to the redirect. */
+    return rel(u.pathname + u.search + u.hash);
   } catch {
     return fallback;
   }
@@ -67,7 +73,7 @@ export async function requireSession(next) {
   } catch {
     /* fall through: better to redirect than to boot a session-less app */
   }
-  location.replace('/login?next=' + encodeURIComponent(target));
+  location.replace(at('login') + '?next=' + encodeURIComponent(target));
   return false;
 }
 
@@ -111,5 +117,5 @@ export async function providerEnabled(name, timeoutMs = 4000) {
 export async function signOut() {
   if (!client) return;
   try { await client.auth.signOut(); } catch { /* already gone */ }
-  location.href = '/';
+  location.href = BASE;
 }

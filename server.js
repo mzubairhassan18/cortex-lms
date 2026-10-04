@@ -161,19 +161,26 @@ app.use(express.static(path.join(__dirname, 'public'), {
   },
 }));
 /*
- * The canvas gesture layer (@use-gesture) is imported by js/graph.js as a bare
- * specifier. There is no bundler, so index.html's import map points at these
- * URLs and this route resolves them straight out of node_modules — nothing is
- * vendored or checked in, `npm install` is enough.
+ * @use-gesture is imported by js/graph.js as a bare specifier, and there is no
+ * bundler, so index.html's import map resolves it. The targets used to be read
+ * straight out of node_modules by a /lib/use-gesture route; they now live in
+ * public/vendor/use-gesture/, because the deployed site is a folder of static
+ * files with no npm install behind it — and two sources of truth for one import
+ * map is one too many.
  */
-app.use('/lib/use-gesture',
-  express.static(path.join(__dirname, 'node_modules', '@use-gesture'), { index: false }));
 
-/* Route map (auth gates arrive in P2 and wrap /app):
- *   /      -> public landing page
- *   /app   -> the application itself
- * Every asset URL inside index.html is absolute, so serving it from /app
- * resolves exactly as it did from /.
+/* Route map (the auth gate in public/js/auth.js wraps /app and /workspaces):
+ *   /           -> public landing page
+ *   /app        -> the application itself
+ *   /workspaces -> the standalone workspace picker
+ *   /login, /signup -> one document, two routes
+ *   /pricing    -> the static pricing page
+ *
+ * Every asset URL in the HTML is './'-relative, so serving index.html from /app
+ * resolves exactly as it did from / — and so the same bytes still resolve when
+ * the site is published a level down under /<repo>/. What these routes provide
+ * that a static host cannot is the path->document mapping itself; GitHub Pages
+ * gets that from a real app/index.html folder instead (scripts/assemble.mjs).
  */
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'landing.html')));
 app.get('/app', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
