@@ -723,7 +723,13 @@ scheme (verified: light-visit → `/app` → still light).
 
 **P2 — Identity**
 9. [x] Schema + RLS from row one *(P2.1, 2026-10-05 — 7 tables, 19 policies, 0 advisor findings)*
-10. [ ] Auth (Google OAuth + email) — gate in front of `/app` *(login/signup pages)*
+10. [x] Auth screens + gate *(P2.8, 2026-10-05)* — `/login` and `/signup` are one
+    document behind two routes, Google primary with email magic link as the free
+    fallback. `GATE='auto'` in `js/auth.js` holds the gate off on localhost so
+    the local demo keeps working; flip it to `'on'` once the provider is live.
+    **Still needs the user to create a Google OAuth client and enable the
+    provider** (3 dashboard steps, listed in PROGRESS P2.8). The gate is UX only
+    — RLS is the boundary, and P2.1 proved it denies everything.
 11. [ ] Workspaces (cards → app) — *local half done in §2.5; auth + user scoping remain*
 12. [ ] User/workspace scoping on every route
 13. [ ] BYOK (per-user provider + key, stored server-side)

@@ -21,6 +21,7 @@ import { loadConversations, selectConversation } from './conversations.js';
 import { updateCollapsed } from './explain-ui.js';
 import { initGraph } from './graph.js';
 import { initExport } from './export.js';
+import { requireSession } from './auth.js';
 import { initWorkspaces } from './workspaces.js';
 import { updateToolbarDensity } from './overlays.js';
 import { initTheme } from './theme.js';
@@ -57,6 +58,16 @@ function endBoot() {
 export async function init() {
   try {
     initTheme();   // theme first: no point painting a toolbar in the wrong scheme
+
+    /*
+     * Auth gate. It sits before the /workspaces branch so BOTH shells are
+     * covered — they are the same document, just different routes. Returning
+     * early still falls through to endBoot() in `finally`, so the redirect
+     * cannot strand the user on the loader.
+     *
+     * This is a UX redirect only; RLS is the actual boundary (see js/auth.js).
+     */
+    if (!(await requireSession())) return;
 
     /*
      * /workspaces is the standalone picker: same document as /app, different

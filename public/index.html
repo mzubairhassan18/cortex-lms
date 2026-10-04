@@ -353,6 +353,9 @@
   </div>
 
   <script src="/vendor/marked.min.js"></script>
+  <!-- Supabase UMD bundle: a classic script, so it runs before the module
+       graph is fetched and window.supabase is ready when js/auth.js loads. -->
+  <script src="/vendor/supabase.js"></script>
   <!--
     @use-gesture is served unbundled (there is no build step), so its dev guards
     are still in place: every warning reads `process.env.NODE_ENV`. A bundler

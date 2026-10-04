@@ -146,7 +146,20 @@ const IDLE_MS = Number(process.env.IDLE_MS) || 45000;
 
 app.use(express.json({ limit: '16mb' })); // room for uploaded files (base64)
 // index:false so "/" can be the marketing landing page instead of the app.
-app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+/*
+ * Dev-only cache policy. `max-age=0` + ETag is spec-correct, but a module
+ * script the browser reuses from cache pins stale bytes for the lifetime of
+ * the document — we spent a debugging round proving a gate was "broken" when
+ * the code was right and the module map was old. The browser cannot tell the
+ * difference, so don't let it cache: this server is local dev, and production
+ * is static hosting (GitHub Pages), which sets its own headers.
+ */
+app.use(express.static(path.join(__dirname, 'public'), {
+  index: false,
+  setHeaders(res, filePath) {
+    if (/\.(m?js|css|html?)$/i.test(filePath)) res.setHeader('Cache-Control', 'no-store');
+  },
+}));
 /*
  * The canvas gesture layer (@use-gesture) is imported by js/graph.js as a bare
  * specifier. There is no bundler, so index.html's import map points at these
@@ -172,6 +185,11 @@ app.get('/app/', (req, res) => res.redirect(302, '/app'));
  */
 app.get('/workspaces', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/workspaces/', (req, res) => res.redirect(302, '/workspaces'));
+
+/* Login / signup: one document, two routes — the page reads location.pathname
+ * to decide which copy to show, so they can never drift apart. */
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'auth.html')));
+app.get('/signup', (req, res) => res.sendFile(path.join(__dirname, 'public', 'auth.html')));
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(CONV_FILE)) fs.writeFileSync(CONV_FILE, '[]');

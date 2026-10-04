@@ -540,12 +540,47 @@ P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
           copy of the data move across, or stay local-only?) — that is a
           different question with the same number, do not read it as open for
           the local file.
-[ ] P2.8  Signup / login screen — Google OAuth PRIMARY (user: "essential"),
-          email magic link as the free fallback. [!] Needs a Google Cloud
-          OAuth client (redirect URI
-          https://agyxcfnfvggpbhzyhrsj.supabase.co/auth/v1/callback) and the
-          provider enabled in the Supabase dashboard — USER ACTION, cannot be
-          done from here.
+[x] P2.8  2026-10-05 Login + signup screens and the auth gate
+          ONE document, two routes: server.js maps /login and /signup to
+          public/auth.html, and auth-page.js reads location.pathname to pick
+          the copy — so the two can never drift. Verified in the browser:
+          /login = "Sign in to Cortex" / "Continue with Google" / "Send me a
+          sign-in link"; /signup = "Create your Cortex account" / "Free forever
+          for up to 50 questions a day. No card, no password." / "Sign up with
+          Google" / "Already have an account? Sign in". 0 console errors on both.
+          Google is primary (user: "essential"); email magic link is the free
+          fallback that needs no SMTP config of our own.
+          Client: @supabase/supabase-js installed and the self-contained UMD
+          bundle vendored to public/vendor/supabase.js (218 KB, no external
+          requires) - the same pattern marked.min.js already uses, so still no
+          build step and no runtime CDN we do not control. It is a classic
+          <script> before the module graph, so window.supabase exists by the
+          time js/auth.js is imported.
+          GATE (js/auth.js) = 'auto': on everywhere except localhost, because
+          the local demo must keep working while auth is still being
+          configured. 'on' flips it on for good; 'off' is the escape hatch if
+          we deploy before auth is ready, so the site never locks out its own
+          users. safeNext() parses `next` against our own origin, so a crafted
+          ?next= cannot bounce anyone off-site.
+          VERIFIED: with GATE='on', a cold load of /app redirected to
+          /login?next=%2Fapp (next preserved, 0 errors); with GATE='auto' on
+          localhost, /app boots normally - init() finished (data-boot cleared)
+          with all 7 conversations intact and 0 errors.
+          The gate is UX ONLY. RLS is the actual boundary - a signed-out caller
+          sees zero rows whatever the client does (proven in P2.1), which is
+          exactly why a localhost bypass is safe.
+          Dev fix that cost a debugging round: express.static now sends
+          no-store for js/css/html. max-age=0 + ETag is spec-correct, but a
+          module script reused from cache pins stale bytes for the lifetime of
+          the document, and the browser cannot tell you that is what happened.
+          [!] STILL USER ACTION - Google sign-in itself cannot complete until:
+            1. Google Cloud Console -> OAuth client ID (Web), redirect URI
+               https://agyxcfnfvggpbhzyhrsj.supabase.co/auth/v1/callback
+            2. Supabase Dashboard -> Authentication -> Providers -> Google
+               -> paste client id/secret -> Enable
+            3. Authentication -> URL Configuration -> set Site URL to the
+               deployed origin (and allow http://localhost:3000 while testing)
+            4. then flip GATE 'auto' -> 'on' in public/js/auth.js
 [ ] P2.9  Pricing page + bank-transfer payment claims. NO Stripe: user files a
           payment_claims row, an admin approves it and profiles.plan flips.
           bank_details / payment_notice / plans already seeded in
