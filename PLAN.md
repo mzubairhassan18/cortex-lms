@@ -568,32 +568,84 @@ Options for that proxy:
   Node process (best for long SSE streams).
 - **B — serverless**: Supabase Edge Functions as the proxy + static frontend.
 
-### 3.3 Data
+### 3.3 Data — **SCHEMA SHIPPED 2026-10-05 (P2.1)**
+
+Migrations live in `supabase/migrations/`, applied via the Supabase MCP.
+
+| Table | Holds | RLS |
+| ----- | ----- | --- |
+| `profiles` | email, name, avatar, `role`, `plan` — auto-row on signup | enabled, **not forced** (see below) |
+| `workspaces` | `id text`, `user_id`, `name` | forced |
+| `conversations` | header columns + `messages`/`explains`/`summary`/`quiz`/`tests`/`notes` as **JSONB** + `archived` | forced |
+| `files` | extracted `text`, metadata, optional `storage_path` | forced |
+| `payment_claims` | bank-transfer receipts awaiting admin approval | forced |
+| `usage_daily` | **rollup** `(user_id, day, requests, by_kind)` — the meter | forced |
+| `platform_settings` | `plans`, `bank_details`, `payment_notice`, `supabase_limits` | forced |
 
 - **Drizzle ORM: not required.** It is a type-safety/convenience layer over
   SQL; with a plain-JS, no-build codebase its main benefit disappears. Use
   `@supabase/supabase-js` (or raw SQL) first; add Drizzle only if we adopt
-  TypeScript. **(→ confirmed with user?)**
+  TypeScript. **(resolved: no)**
 - **State management: none needed.** `state.js` + explicit Preact renders is
-  enough at this size. If it grows, `@preact/signals` (Preact's own, tiny).
-- Existing local `data/conversations.json` → needs a **migration decision**.
-  **(→ question Q6)**
+  enough at this size. If it grows, `@preact/signals` (Preact's own, tiny). **(no)**
+- **Blobs stay JSONB on `conversations`** rather than being normalised into
+  child tables: the app always loads a conversation whole, so normalisation
+  would buy no query power and cost a join on every read. No GIN index either
+  — the payloads are never filtered on, only read whole.
+- **IDs stay `text`** (the app's 12-char ids) so the local → remote migration
+  needs no remapping.
+- **`usage_daily` is a rollup, not an event log** — one row per user per day.
+  An event table would be ~100× bigger for the same answers, and the 500 MB
+  database is our tightest resource.
+- **Storage plan (decided 2026-10-04):** extracted text in Postgres (API reads
+  are unmetered; Storage egress is 5 GB), originals in the private `library`
+  bucket at `<uid>/<conv_id>/<file_id>`. **Free plan stores text only**
+  (`storage_path` stays null) — a 5 MB PDF becomes ~100 KB of text, which is
+  ~50× less storage and lifts the free-tier ceiling from ~20 users to hundreds.
+  Text extraction moves to the **browser** (`mammoth` + `pdf.js` browser
+  builds, served via the existing import map) so the Edge Function stays a
+  thin LLM proxy and never touches multi-MB uploads.
+- Existing local `data/conversations.json` → **still pending (Q6)**, needs a
+  signed-in account first because every row has an FK to `auth.users`.
+
+**The one RLS exception:** `profiles` is *enabled* but **not forced**. Forcing
+would make the table owner subject to RLS, which breaks (a) the signup
+bootstrap trigger — `auth.uid()` is not reliably set while GoTrue is inserting
+`auth.users` — and (b) `is_admin()`, which is SECURITY DEFINER and therefore
+runs as the owner. `anon` and `authenticated` remain fully restricted; only the
+owner is exempt, and the owner can already `alter table` anything.
 
 ---
 
-## 4. G9 — Hosting (free, no money)
+## 4. G9 — Hosting — **DECIDED 2026-10-04: GitHub Pages + Supabase Edge Function**
 
-| Path | Stack | Free? | Fits streams? | Rewrite cost |
-| ---- | ----- | ----- | ------------ | ------------ |
-| **A** | Express on Render / Koyeb free tier + Supabase (auth+DB) | yes (with sleep/cold start) | **yes** | small — add auth + SQL |
-| **B** | Static on Vercel + Supabase (auth, Postgres, Edge Function proxy) | yes | weaker (function time limits) | large — `server.js` → Edge Functions |
+User chose option A below (2026-10-04), tiers and storage as proposed.
 
-**Recommendation: A now, B later if needed.** Path A keeps the working server,
-and the streaming watchdogs we already built are the reason. Path B is the
-"correct" serverless end-state but costs a rewrite of the provider layer.
+| Option | Cost | Code changes | Streaming proxy | Verdict |
+| ------ | ---- | ------------ | --------------- | ------- |
+| **A — GitHub Pages (static) + Supabase Edge Function (proxy)** | **$0** | port `server.js`'s proxy to 1 Edge Function; base-path + clean-route fixes | ✅ native | **CHOSEN** — the only $0 option with no VPS and no cold-start problem |
+| B — VPS (Oracle *Always Free* ARM, or ~$5/mo) | $0–$5 | **none** — `server.js` runs as-is | ✅ perfect | escape hatch if Edge Functions ever get in the way |
+| C — Vercel | $0 tier, **non-commercial only** | entrypoint + move all `data/` to Supabase | ⚠️ function duration vs our 120 s first-byte / 45 s idle gaps | rejected — we intend to charge users |
+| D — Render / Railway / Fly | ~$7+/mo or 30–60 s cold starts | low | ⚠️ | rejected |
+| E — Cloudflare Pages + Workers | $0 | port proxy to a Worker | ✅ | deferred with R2 (user: "skip it, for now") |
 
-**Hosting is deferred to P3 so P1/P2 are not blocked by it.** Local development
-is unaffected either way.
+**GitHub Pages alone is not enough** — the app is not static. Three blockers:
+
+1. **The BYOK proxy must run somewhere.** Browsers cannot call OpenAI/Anthropic
+   directly (no CORS headers), so `server.js`'s streaming proxy has to move
+   into a **Supabase Edge Function** (Deno). This is §3.2's constraint B.
+2. **Sub-path URLs.** A project site serves at `…github.io/cortex-lms/` but
+   every asset URL in our HTML is absolute (`/style.css`, `/js/main.js`) → 404.
+   Needs a base-path fix.
+3. **Clean routes.** `/app` and `/workspaces` are not files; GitHub Pages needs
+   `app/index.html` + `workspaces/index.html` (or the 404-fallback trick).
+
+**Trap that must be handled on deploy:** Supabase Free projects **pause after
+1 week of inactivity** — DB, Auth *and* Storage all sleep. A GitHub Actions
+cron pinging the project every 5 days is therefore not optional.
+
+**Hosting remains a P3 task**, but the choice is now fixed so P2 can be built
+against it. Local development is unaffected either way.
 
 ---
 
@@ -670,15 +722,20 @@ scheme (verified: light-visit → `/app` → still light).
 8. [x] Landing page
 
 **P2 — Identity**
-9. Auth (signup/login) — gate in front of `/app`
-10. Workspaces (cards → app) — *local half done in §2.5; auth + user scoping remain*
-11. User/workspace scoping on every route
-12. BYOK (per-user provider + key, stored server-side)
-13. Migrate existing local data *(pending Q6)*
+9. [x] Schema + RLS from row one *(P2.1, 2026-10-05 — 7 tables, 19 policies, 0 advisor findings)*
+10. [ ] Auth (Google OAuth + email) — gate in front of `/app` *(login/signup pages)*
+11. [ ] Workspaces (cards → app) — *local half done in §2.5; auth + user scoping remain*
+12. [ ] User/workspace scoping on every route
+13. [ ] BYOK (per-user provider + key, stored server-side)
+14. [ ] Pricing page + bank-transfer payment claims (no Stripe)
+15. [ ] Admin dashboard (users, requests, Supabase-limit gauges, claim queue)
+16. [ ] Port `server.js`'s streaming proxy → Supabase Edge Function
+17. [ ] Migrate existing local data *(pending Q6)*
 
 **P3 — Ship**
-14. Host it free *(pending Q4/Q5)*
-15. Domain/URL, final smoke test
+18. Host it free — **decided: GitHub Pages + Supabase Edge Function (§4)**
+19. Base-path + clean-route fixes for GitHub Pages; Actions heartbeat
+20. Domain/URL, final smoke test
 
 ---
 
@@ -687,9 +744,9 @@ scheme (verified: light-visit → `/app` → still light).
 | ID | Question | Status |
 | -- | -------- | ------ |
 | Q1 | Build the graph ourselves (Preact + SVG) or migrate to React for React Flow? | **resolved 2026-10-03 — build it ourselves** (see §2.2; shipped, no drag/ports needed yet) |
-| Q2 | Hosting path A (Express + free PaaS) vs B (Supabase serverless)? | **open** (P3; recommendation A in §4) |
+| Q2 | Hosting path A (Express + free PaaS) vs B (Supabase serverless)? | **resolved 2026-10-04 — user chose GitHub Pages + Supabase Edge Function** (a variant of B; see §4 for the three blockers and why "just enable the setting" is not enough) |
 | Q3 | Phase order — P1 UI first, or auth/workspaces first? | **resolved 2026-10-03 — P1 first** (user: local full working demo, then Supabase creds) |
-| Q4 | Auth provider: Supabase Auth vs self-rolled? | **open** (P2) |
+| Q4 | Auth provider: Supabase Auth vs self-rolled? | **resolved 2026-10-04 — Supabase Auth.** Google OAuth is the primary sign-in (user: "essential"), email magic link as the free fallback. Needs a Google Cloud OAuth client + the provider enabled in the Supabase dashboard (user action). |
 | Q5 | Drizzle yes/no + state-lib yes/no | **resolved: both no** |
 | Q6 | Migrate the existing 6 local conversations into a workspace? | **open** (P2) |
 | Q7 | "encapsulate under user preferences, no sidebar route, just give a link" — what is this? | **open** |
@@ -728,6 +785,13 @@ scheme (verified: light-visit → `/app` → still light).
 | 2026-10-04 | **A board nobody has touched is framed for them**: centred, and never closer than 56 px to the top/left, then `camTouched` latches on the first user pan/zoom so a later render can never re-centre a board they deliberately moved. |
 | 2026-10-04 | **`liftBoard()`'s guard was inverted** (`lift <= 0` where `lift = min(0, min y)` is always ≤ 0) — a no-op since `d37659e`, and the actual cause of explanations sitting under the header. Now `lift >= 0`. Fix this independently of the canvas work: it is the bug, the camera is the experience. |
 | 2026-10-04 | **One library, deliberately narrow: `@use-gesture` for wheel + pinch only.** Device decoding (trackpad, multi-touch) is the hard part and worth buying; the camera maths and the pan rules (Space / middle button / empty board, click suppression) are app policy and stay here. A canvas renderer — Konva/Pixi/litegraph/react-flow — would have to *redraw the live DOM* the nodes host, and `panzoom`/`d3-zoom` own the transform we just took over. Served from `node_modules` by a new `/lib/use-gesture` route + an import map, so there is still no build step. **`pinchOnWheel: false` or Ctrl+wheel zooms twice** (100 % → 232 %). |
+| 2026-10-04 | **Hosting = GitHub Pages (static) + Supabase Edge Function (proxy).** $0, no VPS, no cold start. GitHub Pages *alone* cannot work: the BYOK proxy needs a server (no CORS from providers), project sites serve under a sub-path while our asset URLs are absolute, and `/app`+`/workspaces` are not files. Vercel rejected because the Hobby plan is non-commercial and its duration limits fight our 120 s first-byte / 45 s idle gaps. Supabase Free **pauses after 1 week idle**, so a GitHub Actions heartbeat is mandatory. §4. |
+| 2026-10-04 | **Storage: text in Postgres, originals in Supabase Storage, and Free stores text only.** Storage egress is metered (5 GB) while Postgres API reads are unmetered, and the extracted text is what the app actually reads. Keeping originals for paid plans only turns a 5 MB PDF into ~100 KB of text — ~50× less storage, lifting the free ceiling from ~20 users to hundreds. Extraction moves to the browser (`mammoth`/`pdf.js` browser builds) so the Edge Function never handles multi-MB uploads. R2 deferred by the user ("skip it, for now"). §3.3. |
+| 2026-10-04 | **Pricing tiers meter our Supabase resources, not tokens** — BYOK means the user pays for their own LLM usage, so the scarce things are Edge Function invocations (500 K/mo) and database size (500 MB, the real ceiling). Free 50 req/day · Pro $9/mo · Team $29/mo. **Payment is bank transfer, no Stripe**: user files a `payment_claims` row, an admin approves it and the plan flips. |
+| 2026-10-05 | **Blobs stay JSONB on `conversations`; `usage_daily` is a rollup, not an event log.** The app loads a conversation whole, so normalising `messages`/`explains`/`summary`/`quiz` buys no query power and costs a join per read — and no GIN index, because those payloads are never filtered on. An event table would be ~100× bigger than one row per user per day for the same answers, and the 500 MB database is our tightest resource. |
+| 2026-10-05 | **`profiles` is the one table with RLS enabled but not forced.** FORCE would make the owner subject to RLS, breaking both the signup bootstrap trigger (GoTrue has no `auth.uid()` yet) and `is_admin()`, which is SECURITY DEFINER and so runs as the owner. `anon`/`authenticated` stay fully restricted; only the owner is exempt, and the owner can already `alter table` anything. Everything else is forced. |
+| 2026-10-05 | **SECURITY DEFINER helpers live in a `private` schema, never `public`.** PostgREST only serves `public`, so `public.is_admin()` was RPC-callable by anyone holding the anon key — and revoking from `anon` alone does nothing, because **PostgreSQL grants EXECUTE to `PUBLIC` by default** and `anon` inherits it. Moving all three to `private` cleared both advisor lints (now 0 findings). Verified with a probe that PostgreSQL checks EXECUTE at trigger *creation*, not fire time, so revoking cannot break sign-up. |
+| 2026-10-05 | **`updated_at` is set by a database trigger, not trusted from the client** — `conversations_ws_time_idx` orders the conversation list by it, so an un-stamped row would strand a chat at the bottom forever. |
 
 ---
 

@@ -486,7 +486,36 @@ See PLAN.md 2.5 for the full write-up.
 
 P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
 ------------------------------------------------------
-[ ] P2.1  Signup / login screen
+[x] P2.1  2026-10-05 Schema + RLS from row one (supabase/migrations/)
+          Migrations 20261004000000_p2_core_schema.sql +
+          20261005000000_p2_harden_security_definer.sql, applied live via the
+          Supabase MCP. 7 tables: profiles, workspaces, conversations, files,
+          payment_claims, usage_daily, platform_settings. 19 policies + 4
+          storage policies on the private `library` bucket (50 MB cap).
+          Decisions: blobs stay JSONB on conversations (the app always loads
+          one whole - normalising buys no query power, costs a join per read;
+          no GIN index either, they are never filtered on); usage_daily is a
+          ROLLUP not an event log (~100x smaller for the same answers, and the
+          500 MB database is our tightest resource); IDs stay `text` so the
+          local->remote migration needs no remapping.
+          RLS verified as a simulated signed-in user (set role authenticated
+          + fake jwt claims): 0 rows across every private table, while
+          platform_settings correctly returns its 4 readable config rows.
+          SECURITY ADVISORS: 0 findings. Two lints were fixed on the way -
+          (1) revoking EXECUTE from `anon` alone does NOTHING, because
+          PostgreSQL grants EXECUTE to PUBLIC by default and anon inherits
+          it; (2) all three SECURITY DEFINER helpers were RPC-callable at
+          /rest/v1/rpc/, so they moved to a `private` schema PostgREST does
+          not expose (10 policies recreated against private.is_admin()).
+          Probe proved PostgreSQL checks EXECUTE at trigger CREATION, not
+          fire time - so tightening cannot break the signup trigger.
+          `profiles` is the one table enabled-but-not-FORCED (documented):
+          FORCE would break both the signup bootstrap (GoTrue has no auth.uid()
+          yet) and is_admin(), which is SECURITY DEFINER and so runs as owner.
+          updated_at is set by DB trigger, not trusted from the client -
+          conversations_ws_time_idx orders the list by it.
+          NOT DONE: no schema work happens without the supabase-postgres-
+          best-practices skill loaded (it is in .agents/skills/).
 [x] P2.2  2026-10-03 Workspace picker — TWO forms now: the zoomed-out canvas
           (#ws-layer, P1.19) AND a standalone /workspaces route (P1.29) with
           search + grid/list, reachable from the landing CTAs and the sidebar
@@ -511,12 +540,37 @@ P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
           copy of the data move across, or stay local-only?) — that is a
           different question with the same number, do not read it as open for
           the local file.
+[ ] P2.8  Signup / login screen — Google OAuth PRIMARY (user: "essential"),
+          email magic link as the free fallback. [!] Needs a Google Cloud
+          OAuth client (redirect URI
+          https://agyxcfnfvggpbhzyhrsj.supabase.co/auth/v1/callback) and the
+          provider enabled in the Supabase dashboard — USER ACTION, cannot be
+          done from here.
+[ ] P2.9  Pricing page + bank-transfer payment claims. NO Stripe: user files a
+          payment_claims row, an admin approves it and profiles.plan flips.
+          bank_details / payment_notice / plans already seeded in
+          platform_settings; the bank account fields are filled in later from
+          the admin side (user's request).
+[ ] P2.10 Admin dashboard — users + MAU, AI requests today/month, per-plan
+          usage, Supabase free-tier gauges (warn at 70/85/95%), payment claim
+          queue, bank-details editor.
+[ ] P2.11 Port server.js streaming proxy -> one Supabase Edge Function
+          (Deno), for the GitHub Pages hosting path chosen in P3.1.
 
 P3 — SHIP
 ---------
-[ ] P3.1  Choose hosting path [!] BLOCKED on Q4/Q5 (A: Express on free PaaS,
-          B: Supabase serverless)
-[ ] P3.2  Deploy + smoke test
+[x] P3.1  2026-10-04 Host it free — PATH CHOSEN: GitHub Pages (static) +
+          Supabase Edge Function (LLM proxy). $0, no VPS, no cold start.
+          Why GitHub Pages ALONE fails: the BYOK proxy needs a server (no CORS
+          from providers); project sites serve under /cortex-lms/ while every
+          asset URL in our HTML is absolute; /app and /workspaces are not
+          files. Vercel rejected - Hobby plan is non-commercial and its
+          duration limits fight our 120s first-byte / 45s idle gaps.
+          Watch out: Supabase Free PAUSES after 1 week idle (DB+Auth+Storage
+          all sleep) so a GitHub Actions heartbeat every 5 days is mandatory.
+          Escape hatch if Edge Functions misbehave: Oracle Always Free VPS,
+          zero code changes to server.js.
+[ ] P3.2  Deploy + smoke test (base-path fix, clean routes, heartbeat cron)
 [ ] P3.3  Public URL
 
 OPEN QUESTIONS (see PLAN.md section 7)
@@ -524,10 +578,16 @@ OPEN QUESTIONS (see PLAN.md section 7)
 [x] Q1  2026-10-03 Graph: build in Preact+SVG, or migrate to React for React
         Flow? -> BUILD OURSELVES. Shipped in graph.js/graph.css, no new dep.
         Revisit only if we ever need drag-to-move nodes / free-form ports.
-[!] Q2  Hosting path A vs B  (P3; recommendation is A — keeps server.js)
+[x] Q2  2026-10-04 Hosting path -> GitHub Pages + Supabase Edge Function,
+        chosen by the user (see P3.1 / PLAN.md section 4 for the three
+        blockers). Cloudflare (Pages+Workers, R2) explicitly deferred by the
+        user: "skip it, for now".
 [x] Q3  2026-10-03 Phase order -> P1 FIRST. User: local full working demo,
         then Supabase credentials arrive (possibly via MCP) for auth/hosting.
-[!] Q4  Auth: Supabase Auth vs self-rolled?  (P2)
+[x] Q4  2026-10-04 Auth -> Supabase Auth. Google OAuth primary ("essential"),
+        email magic link as the free fallback. No SMTP cost, no self-rolled
+        session handling. Blocked only on the user creating the Google OAuth
+        client and enabling the provider.
 [x] Q5  Drizzle + state-lib -> BOTH NO. Plain JS, no build step; state.js +
         explicit Preact renders; @preact/signals only if state gets painful.
 [!] Q6  Migrate the existing 6 local conversations?  (P2)
