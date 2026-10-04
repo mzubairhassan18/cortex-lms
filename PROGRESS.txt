@@ -636,7 +636,34 @@ P3 — SHIP
           all sleep) so a GitHub Actions heartbeat every 5 days is mandatory.
           Escape hatch if Edge Functions misbehave: Oracle Always Free VPS,
           zero code changes to server.js.
-[ ] P3.2  Deploy + smoke test (base-path fix, clean routes, heartbeat cron)
+[x] P3.1b 2026-10-05 public/ made publishable (commit 5c77310) — the answer to
+          "can't we just host the folder?" is yes, and this was the rest of the
+          way. 38 root-absolute href/src values across the four HTML documents
+          went './'-relative; js/base.js derives the deploy base from its own
+          module URL (a module URL has an unambiguous directory; location.pathname
+          does not) and route()/at() are now the only way the app reads or builds
+          a path — which is what keeps auth.html's login-vs-signup mode working
+          under a sub-path. @use-gesture vendored to public/vendor/use-gesture/
+          (7 esm files, 62 KB) and the GET /lib/use-gesture route removed: a
+          static host has no route table. scripts/assemble.mjs -> out/ writes the
+          clean-route folders and a .nojekyll. Not a build step — nothing is
+          transpiled or bundled and server.js never runs it.
+          TWO BUGS THE PREVIEW CAUGHT: (1) '../' resolves against the document
+          directory, and /cortex-lms/app has no trailing slash, so the app's own
+          script tag resolved to /js/main.js — and the first preview also served
+          out/ from the root, so it loaded anyway and the base silently came out
+          as '/', sending every redirect off-site. Assemble now stamps an
+          absolute configured base, and --serve 404s outside it exactly as Pages
+          would. (2) <base href> was rejected on purpose: it re-resolves
+          fragment-only references, and index.html carries 35 <use href="#i-plus">
+          sprite refs that would all have pointed at the wrong document.
+          Verified at /cortex-lms/: landing, app, signup, pricing all render with
+          0 console errors; /cortex-lms/app -> /cortex-lms/login?next=%2Fapp and
+          /cortex-lms/signup reads as signup mode.
+          Still open: the ~20 fetch('/api/...') calls — that is P2.4 + P2.11,
+          not hosting.
+[ ] P3.2  Deploy + smoke test (Actions workflow that runs assemble, heartbeat
+          cron)
 [ ] P3.3  Public URL
 
 OPEN QUESTIONS (see PLAN.md section 7)

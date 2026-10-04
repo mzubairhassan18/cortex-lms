@@ -507,10 +507,15 @@ zustand/react-spring team; 4.3 KB + 11 KB core, one transitive dep, ESM only).
 It supplies **wheel and pinch only**; this module still owns the camera and the
 drag-to-pan rules, because those are app policy, not device decoding.
 
-- Served straight from `node_modules` by a new `GET /lib/use-gesture` route in
-  `server.js`, resolved by an **import map** in `index.html` — so the no-build-
-  step rule holds. All five bare specifiers verified to resolve to real `.esm.js`
-  files; the package's own imports are relative.
+- Vendored into `public/vendor/use-gesture/` (7 `.esm.js` files, 62 KB) and
+  resolved by an **import map** in `index.html` — so the no-build-step rule
+  holds. All five bare specifiers verified to resolve to real files; the
+  package's own imports are relative, which is why the tree copies cleanly.
+  It was originally served straight from `node_modules` by a
+  `GET /lib/use-gesture` route in `server.js`; that route was removed
+  2026-10-05 (commit `5c77310`) when the site became publishable as a plain
+  folder of static files — a static host has no route table, and two sources
+  of truth for one import map is one too many.
 - Its ESM is unbundled, so the bundler guards are still in there — every dev
   warning reads `process.env.NODE_ENV`. A bundler would have inlined
   `'production'`; instead `<head>` defines that object before the module graph
@@ -634,18 +639,32 @@ User chose option A below (2026-10-04), tiers and storage as proposed.
 1. **The BYOK proxy must run somewhere.** Browsers cannot call OpenAI/Anthropic
    directly (no CORS headers), so `server.js`'s streaming proxy has to move
    into a **Supabase Edge Function** (Deno). This is §3.2's constraint B.
-2. **Sub-path URLs.** A project site serves at `…github.io/cortex-lms/` but
-   every asset URL in our HTML is absolute (`/style.css`, `/js/main.js`) → 404.
-   Needs a base-path fix.
-3. **Clean routes.** `/app` and `/workspaces` are not files; GitHub Pages needs
-   `app/index.html` + `workspaces/index.html` (or the 404-fallback trick).
+   *Still open — P2.11.*
+2. ~~**Sub-path URLs.**~~ **Resolved 2026-10-05 (commit `5c77310`).** Asset URLs
+   are `./`-relative in the HTML, and `js/base.js` derives the deploy base from
+   its own module URL — unlike `location.pathname`, a module URL has an
+   unambiguous directory — with `route()` / `at()` as the only way the app reads
+   or builds a path. `scripts/assemble.mjs` then stamps the configured base into
+   `out/`, because a *relative* URL is still ambiguous for a document served
+   without a trailing slash: `/cortex-lms/app`'s directory is `/cortex-lms/`, so
+   `../js/main.js` resolves to `/js/main.js`.
+3. ~~**Clean routes.**~~ **Resolved 2026-10-05.** The same script writes
+   `app/`, `workspaces/`, `login/`, `signup/`, `pricing/` folders and a
+   `.nojekyll`.
+
+**The publish flow is `node scripts/assemble.mjs` → deploy `out/`** (gitignored).
+It is deliberately *not* a build step: nothing is transpiled or bundled, and
+`node server.js` never runs it. `--serve` replays `out/` at `/cortex-lms/` on
+:4173 and **404s outside the base exactly as Pages would** — an earlier version
+of that preview was more permissive than production and hid a real bug.
 
 **Trap that must be handled on deploy:** Supabase Free projects **pause after
 1 week of inactivity** — DB, Auth *and* Storage all sleep. A GitHub Actions
 cron pinging the project every 5 days is therefore not optional.
 
-**Hosting remains a P3 task**, but the choice is now fixed so P2 can be built
-against it. Local development is unaffected either way.
+**Hosting's remaining work is blocker 1 (the Edge Function), the Actions
+heartbeat above, and an Actions workflow that runs the assemble step.** Local
+development is unaffected either way.
 
 ---
 
