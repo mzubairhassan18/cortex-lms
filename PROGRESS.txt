@@ -300,6 +300,46 @@ See PLAN.md 2.5 for the full write-up.
            create "ZZ test picker" then delete (confirm dialog) — back to the
            original 2, theme round-trip dark->light->dark matches the app,
            card click navigates to /app with the right id in lb.workspace.
+[x] P1.30 2026-10-04 Export button in the summary container header
+            (title [refresh] [download] [x]). One click opens a 3-item menu:
+            PDF document .pdf, Word document .docx, Plain text .txt - the
+            brief's "two to three versions or files". Split in two so nothing
+            can cycle:
+              public/js/export-format.js  the writers. NO IMPORTS AT ALL: takes
+                plain objects, returns bytes, runs under node so it is testable
+                outside a browser.
+              public/js/export.js         collects summaryCache + testsCache +
+                state.notes, names the file, owns the menu (open on button,
+                close on select / outside click / Escape / re-press,
+                aria-expanded tracks it).
+            Both targets render ONE block list (renderBlocks: title|sub|lead|
+            h2|bullet|src|text|gap|rule) from the same document - headline,
+            key findings, topics, questions asked, your notes WITH their source
+            quote, tests taken - so the three files can never disagree.
+            TXT: UTF-8, markdown stripped.
+            PDF: hand-written 1.4 - Catalog/Pages, two base-14 Helvetica
+              fonts, one content stream per page, hand-computed xref, canvas
+              line-wrapping. toLatin1() TRANSLITERATES instead of dropping, so
+              physics survives a base-14 font: Greek -> alpha/beta/...,
+              sqrt, ~=, <= >= !=, arrows, ohm, super/subscript digits.
+            DOCX: real Office Open XML - [Content_Types].xml, _rels/.rels,
+              word/document.xml, zipped STORED (no deflate) with a locally
+              computed CRC32.
+            The menu lives inside #summary-overlay, which graph view MOVES
+            wholesale into the summary node, so it works in both layouts with
+            no view-specific code.
+            Verified: harness (1-page + forced 8-page) checks header/EOF,
+            startxref->xref, every xref offset opens the right N 0 obj, object
+            numbering contiguous, every stream /Length lands on endstream, every
+            /Contents n 0 R resolves to a stream, nothing painted outside
+            MediaBox, CRC32 recomputed per zip entry, toLatin1 leaks no byte
+            >0xFF; THEN real readers on the browser's own downloads -
+            pdf-parse opens both PDFs (1 and 8 pages, full text), mammoth opens
+            both .docx with 0 messages. In-browser: all three download with the
+            right name + MIME, menu open/close/outside/Escape/aria all pass,
+            list AND graph (menu 186x109, no ancestor clips it), dark<->light
+            round trip repaints from tokens, 0 console errors.
+            New sprite symbol: i-download (30 -> 31).
 
 P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
 ------------------------------------------------------
@@ -352,6 +392,13 @@ OPEN QUESTIONS (see PLAN.md section 7)
         link" — meaning unclear, needs clarification
 [x] Q8  2026-10-03 Graph view coexists with list view behind the header toggle
         (the brief literally says "list view <-> graph view").
+[!] Q9  2026-10-04 Summary/quiz accuracy rework — where to start? Plan is in
+        PLAN.md section 9 (diagnosis: quiz built from a last-30-message digest
+        instead of the transcript, tutor clipped to 500 chars, grading is bare
+        index equality with no verification pass, temperature 0.8, per-request
+        Auto model, sanitizePoints drops short facts). Recommended: Phases 1+2
+        together (ground it on the same chunks the summary reads, then verify
+        every answer key and drop unverifiable questions). AWAITING GO-AHEAD.
 
 DONE SO FAR (v1 — all shipped)
 ------------------------------

@@ -387,6 +387,59 @@ workspace dropdown gains an **All workspaces** row (an `<a>`, so it can be
 opened in a new tab). `/app` still opens directly with the remembered
 workspace — the existing UI is untouched.
 
+### 2.8 Export from the summary container — **IMPLEMENTED 2026-10-04**
+
+One more request on the summary: *"give there a button to export … export in
+PDF or export in Word … or export in TXT."* The header of `#summary-overlay`
+(now `title ↻ ⬇ ✕`) gains an **Export** button that opens a three-item menu —
+PDF document `.pdf`, Word document `.docx`, Plain text `.txt`.
+
+**One block list, three writers.** `renderBlocks(doc)` turns the current
+conversation's summary (title, headline, key findings, topics, questions you
+asked, your own notes with their source quote, tests taken) into a flat list of
+`{k, t}` blocks — `title | sub | lead | h2 | bullet | src | text | gap | rule`.
+Every target renders *that* list, so the three files can never disagree:
+
+| | file |
+| - | ---- |
+| `public/js/export-format.js` | the writers. **No imports at all**, deliberately: it takes plain objects and returns bytes, so it runs under `node --experimental-default-type=module` and can never pull the DOM layer into an import cycle. |
+| `public/js/export.js` | collects the live document (`summaryCache` + `testsCache` + `state.notes`), names the file, owns the menu. |
+
+- **TXT** — UTF-8, markdown stripped.
+- **PDF** — a hand-written PDF 1.4: Catalog/Pages, two base-14 Helvetica
+  fonts, one content stream per page, hand-computed xref. No library, no build
+  step, no network. Line wrapping measures against a canvas in the browser
+  (an estimate outside one). Because a base-14 font only draws WinAnsi, every
+  string goes through `toLatin1()` — which **transliterates rather than drops**
+  what a physics session actually contains: Greek letters to their names,
+  `√ → sqrt`, `≈ → ~=`, `≤ >= ≠`, arrows, `Ω → ohm`, super/subscript digits.
+- **DOCX** — a real Office Open XML package: `[Content_Types].xml`,
+  `_rels/.rels`, `word/document.xml`, zipped with **STORED** entries (no
+  deflate) and a locally computed CRC32.
+
+**The menu travels with the container.** It lives inside `#summary-overlay`,
+which the graph view moves wholesale into the summary node, so nothing here
+knows which layout is showing; `.gn-host`'s early return in `onGraphClick`
+already puts header clicks out of reach of the node handlers.
+
+**Verified**
+
+- *Container-level harness* (1-page and forced 8-page documents): header/EOF,
+  `startxref` lands on `xref`, every xref offset opens the right `N 0 obj`,
+  object numbering contiguous, every stream's `/Length` lands exactly on
+  `endstream`, every `/Contents n 0 R` resolves to a stream object, no text
+  painted outside `MediaBox`, CRC32 recomputed per zip entry, `.docx` entry
+  names exact, `toLatin1` never leaks a byte above `0xFF`.
+- *Real readers* on the harness output *and* on the files the browser actually
+  downloaded: **pdf-parse (pdf.js)** opens both PDFs (1 and 8 pages, full text),
+  **mammoth** opens both `.docx` with **0 messages**.
+- *In browser*: all three download with the right name
+  (`what-is-machine-learning-summary.pdf|docx|txt`) and MIME; menu opens on the
+  button, closes on selection / outside click / Escape / second press, `aria-expanded`
+  tracks it; works in list view **and** inside the graph summary node (menu
+  `186×109`, no ancestor clips it); dark ↔ light round trip repaints the menu
+  from tokens; **0 console errors**.
+
 ---
 
 ## 3. G5–G8 — Auth, workspaces, per-user data, BYOK
@@ -540,6 +593,7 @@ scheme (verified: light-visit → `/app` → still light).
 | Q6 | Migrate the existing 6 local conversations into a workspace? | **open** (P2) |
 | Q7 | "encapsulate under user preferences, no sidebar route, just give a link" — what is this? | **open** |
 | Q8 | Graph view: does it *replace* the list view or coexist forever? | **resolved 2026-10-03 — coexist behind the header toggle** (brief: "list view ⇄ graph view") |
+| Q9 | Summary/quiz accuracy rework — start where? | **open** (plan in §9; recommended Phases 1+2 together, awaiting go-ahead) |
 
 ---
 
@@ -563,3 +617,86 @@ scheme (verified: light-visit → `/app` → still light).
 | 2026-10-03 | Theme default = OS preference, manual choice wins and persists (`lb.theme`); applied inline in `<head>` to avoid a flash. |
 | 2026-10-03 | Texture only on *backdrop* surfaces — panels stay flat so they read as cards on a desk. Graph canvas additionally gets a dot grid. |
 | 2026-10-03 | `schedule()` arms a 120 ms timer beside rAF: a hidden tab never runs rAF, which would otherwise freeze graph state (and collapse-on-scroll) until the window is shown. |
+| 2026-10-04 | **Summary export = one block list, three writers** (`export-format.js` has *no imports*, so it is testable outside a browser and can never create a cycle). PDF is hand-written base-14 Helvetica and DOCX is a STORED zip — no library, no build step, no network, nothing to install. |
+
+---
+
+## 9. Summary & quiz accuracy — **DIAGNOSED 2026-10-04, plan awaiting go-ahead**
+
+> User report: *"the questions are not very accurate and the answers are not
+> very accurate … I cross-checked with some other resources, the question I
+> selected was correct but the system shows that that is incorrect."*
+
+A correct user marked wrong. Diagnosis from the code, worst cause first.
+
+### 9.1 Root causes (`summary.js` / `quiz.js` / `server.js`)
+
+1. **The quiz is written from a digest, not from the conversation.**
+   `runQuiz()` feeds the model `summaryPromptInput()`, which keeps
+   `main.slice(-30)` clipped to **400 chars** each plus explainer excerpts
+   clipped to **300**. A fact older than 30 messages, or past 400 chars into a
+   real answer, is not in front of the model — so it invents a key.
+2. **The summary feed truncates the answer, not the question.**
+   `buildSummaryChunks()` pairs `clip(student, 300)` with `clip(tutor, 500)`.
+   The *conclusion* of a long derivation falls outside 500 chars, so MAP
+   extracts notes from a partial answer and REDUCE faithfully condenses the
+   wrong half. A single unit longer than the ~1100-char budget also becomes
+   its own oversized chunk.
+3. **Nothing ever checks an answer key.** `finishTest()` grades with
+   `picked === answer` — index equality against whatever the generator wrote.
+   If the model marks B when the truth is C, or two options are both true, a
+   correct user is marked wrong. No verification pass, no ambiguity check, no
+   source snippet stored on the question.
+4. **`temperature: 0.8`** in `runQuiz` (the summary uses `0.2`). Variety is
+   already supplied by the `QUIZ_FOCUS` rotation; at 0.8 it also raises the
+   odds of a wrong or mismatched `answer` index.
+5. **The model changes between requests.** `data/settings.json` is
+   `{"provider":"auto","apiKey":""}` → `AUTO_ORDER` starts `kilo, llm7, ovh`
+   (free, no key, small) and **auto re-picks per request**, so batch 1 and
+   batch 4 of one test can come from different models. The live UI already
+   shows `Kilo Code … refused the request (HTTP 401)` — the first choice
+   isn't even reachable.
+6. **Valid short facts are dropped.** `sanitizePoints()` rejects any line
+   under 12 chars and `hasRepetition()` treats fewer than 4 words as "not a
+   real point", so `F = 9.8 m/s²` can vanish from Key findings.
+
+### 9.2 Plan, in order of impact
+
+**Phase 1 — ground it (make the model see the real text)**
+- Generate questions **per chunk** from the same `buildSummaryChunks()` Q&A
+  units the summary already uses, then merge — not from `summaryPromptInput()`'s
+  last-30 digest. Summary and quiz then read one source and cannot disagree
+  about what happened.
+- Clip head+tail instead of head-only (380 + last 220 rather than 500), so the
+  result of a long derivation survives.
+
+**Phase 2 — verify every key (the fix for the actual complaint)**
+- Split *writing* from *keying*: the model returns `{"q","options","correct"}`
+  where `correct` is the right option **as prose**. Code matches it against
+  `options` to set `answer`; no clean match → **drop the question** rather than
+  guess an index.
+- Fact-check pass per batch: question + its source excerpt back to the model —
+  *"which option does this text support? quote the sentence."* Mismatch →
+  repair or drop; no supporting quote → drop.
+- Ambiguity check: *"can more than one option be true?"* → yes → drop.
+- Store the supporting snippet on the question and show it in the results, so a
+  disputed answer is auditable on the spot.
+
+**Phase 3 — hygiene**
+- Quiz `temperature` → ~0.3; keep the variety from `QUIZ_FOCUS`.
+- Relax `sanitizePoints`' 12-char floor (keep the repetition guard).
+- Cache per source chunk so a mid-test provider swap cannot happen.
+
+**Phase 4 — model**
+- Pin background jobs to one model (a "summary & test model" setting) instead of
+  per-request Auto, or let the user BYOK — Gemini/Groq free keys are far
+  stronger than the no-key gateways.
+
+**Guardrail:** a script that regenerates summary + quiz for N existing
+conversations and reports how many questions the verifier drops or repairs —
+before/after numbers, not vibes.
+
+**Status:** plan presented 2026-10-04. Recommended start: **Phases 1+2
+together** — 1 without 2 still trusts the generator, 2 without 1 drops most of
+the questions because there is no good source to check against.
+

@@ -20,6 +20,7 @@ import { renderMessages } from './chat.js';
 import { loadConversations, selectConversation } from './conversations.js';
 import { updateCollapsed } from './explain-ui.js';
 import { initGraph } from './graph.js';
+import { initExport } from './export.js';
 import { initWorkspaces } from './workspaces.js';
 import { updateToolbarDensity } from './overlays.js';
 import { initTheme } from './theme.js';
@@ -57,6 +58,7 @@ export async function init() {
   }
   updateToolbarDensity();
   updateCollapsed();
+  initExport(); // summary header: the PDF / Word / TXT export menu
   input.focus();
 }
 
