@@ -426,6 +426,63 @@ See PLAN.md 2.5 for the full write-up.
             Verified: a 60-event pointermove burst did not write scroll
             (throttled:true), after 80ms scroll = before-(60,40) (applied:true),
             pointerup landed the final offset (landedOnUp:true).
+[x] P1.34 2026-10-04 Graph = infinite canvas; explain no longer hides under
+            the header
+            "if I open two containers ... it is going upward and I can't even
+            with a hand tool make it in center ... it is basically upward in
+            the header hiding" + "make it just like figma canvas, where there
+            is space anywhere." TWO FAULTS, one hiding the other.
+            (1) ROOT CAUSE: liftBoard()'s guard was INVERTED - `lift <= 0
+            return 0` where lift = min(0, min y) is ALWAYS <= 0, so it has
+            returned early without lifting anything since d37659e was written.
+            Layout put opened explains at negative y (measured -270px,
+            -129.6px, -129.6px on a live 13-node board); a scroll box has a
+            top, so scrollTop can never reach them. Now `lift >= 0`.
+            (2) The viewport was a scroll box, which by definition has edges.
+            Replaced with a CAMERA: #graph-scroll overflow:clip, #graph-zoomer
+            deleted, #graph-canvas = translate(camX,camY) scale(zoom). No
+            content box => nothing to scroll => space in every direction.
+            clip not hidden: hidden still makes it a scroll container and the
+            transformed canvas lands in its scrollable overflow, so a touch
+            could move content on top of the camera.
+            Framing: untouched board is centred, never closer than 56px to the
+            top/left; camTouched latches on the first user pan/zoom so a later
+            render cannot re-centre a board they deliberately moved.
+            LIBRARY: @use-gesture/vanilla 10.3.1 (MIT, pmndrs, 4.3KB+11KB,
+            1 transitive dep) for WHEEL + PINCH only; the camera maths and the
+            Space/middle/empty-board pan rules stay in graph.js - device
+            decoding is the hard part worth buying, pan policy is ours. Served
+            from node_modules by a new GET /lib/use-gesture route in server.js
+            + an import map in index.html, so there is STILL NO BUILD STEP.
+            Its unbundled ESM keeps bundler guards (process.env.NODE_ENV) -
+            <head> defines that object before the module graph loads; checked
+            that nothing else on any page reads `process`.
+            GOTCHA: pinchOnWheel defaults TRUE, so the pinch recogniser was on
+            the wheel too and one Ctrl+wheel notch zoomed TWICE (100%->232%).
+            Set pinchOnWheel:false - wheel is ours, pinch is touch.
+            GOTCHA: camera and scroll offsets have OPPOSITE polarity, so the
+            old `sl - (c - x)` had to become `camX + (c - x)`; the wrong sign
+            pulls the board AWAY from you. Caught by test, documented at the
+            formula.
+            foldOutOfView() now hangs off the camera (there is no scroll
+            event), inverting it to `top = -camY/zoom` so the slack stays 140
+            SCREEN pixels; still converges, because a folded explain loses
+            .expanded.
+            Verified, 0 console errors on /, /app, /workspaces: two containers
+            open -> expanded 2, NOTHING above the viewport top, minTop 0,
+            camera translate(56px,56px) scale(1). Drag down 300px -> camera
+            +300, follows the hand, .panning cleared, scrollTop/scrollLeft 0.
+            Wheel (-25,120) -> +(25,-120) exact; one Ctrl+wheel notch ->
+            100%->116% = 1.0015^100 exact; zoom ladder -> 30% still hands the
+            window to #ws-layer, label click back to 100%. Wheel over a real
+            inner scroller (1138x541 message list): default NOT prevented,
+            board unchanged; wheel on the bare board: prevented, board moves.
+            Mouse drag, touch drag, Space+drag and middle-drag all pan (touch
+            pan is NEW - overflow:clip took native scrolling away, so
+            canPanFrom no longer excludes non-mouse and pointerdown cancels for
+            touch only); node/conversation clicks still fire.
+            Pre-existing file note: style.css is still mixed-EOL in HEAD; this
+            change did not touch it.
 
 P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
 ------------------------------------------------------

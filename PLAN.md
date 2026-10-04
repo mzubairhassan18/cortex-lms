@@ -442,6 +442,107 @@ already puts header clicks out of reach of the node handlers.
 
 ---
 
+### 2.9 Infinite canvas — **IMPLEMENTED 2026-10-04**
+
+> User report: *"if I open the explain containers — two containers, for
+> example — it is going upward and I can't even with a hand tool make it in
+> center … it is basically upward in the header hiding and I cannot even pull
+> it down or resize the whole window … it should be a canvas type of thing,
+> like a Figma kind of thing"* and *"make it just like figma canvas, where
+> there is space anywhere."*
+
+Two separate faults, one of which hid the other.
+
+**1. `liftBoard()` had never worked.** The guard read `if (lift <= 0) return 0`
+while `lift` is `min(0, smallest y)` — so it is *always* ≤ 0, and the function
+returned before it ever shifted anything. It has been a no-op since the day it
+was written (`d37659e`). Layout therefore happily placed opened explanations at
+**negative y** (`top: -270px`, `-129.6px` measured on a live 13-node board).
+A scroll box has a top, so `scrollTop` can never reach them: the container sat
+under the header, unscrollable and unresizable — exactly the reported symptom.
+The guard is now `if (lift >= 0) return 0`, which shifts the board down by
+`|lift|` whenever something overhangs.
+
+**2. The viewport was a scroll box, which by construction has edges.** Fixed
+`lift` still leaves you one drag away from hitting the top. So the scroll model
+is gone:
+
+| | before | after |
+| - | ------ | ----- |
+| `#graph-scroll` | `overflow: auto; padding: 28px 36px 40px` | `overflow: clip` |
+| `#graph-zoomer` | box = `base × zoom`, matched the scrollbars | **removed** |
+| `#graph-canvas` | `transform: scale(zoom)`, scrolled by its parent | `transform: translate(camX, camY) scale(zoom)` |
+
+The board is drawn at `world × zoom + (camX, camY)`. Because the camera is a
+**transform** and not a scroll offset, there is nothing to scroll and no content
+box to reach the edge of — space exists in every direction, which is the Figma
+behaviour asked for. `overflow: clip` rather than `hidden` on purpose: `hidden`
+still makes an element a *scroll container*, and a transformed canvas shows up
+as scrollable overflow there, so a touch or an auto-scroll could move the
+content on top of the camera. `clip` means there is nothing to scroll at all.
+
+- **First framing.** A board nobody has touched is centred, and never closer
+  than `CAM_PAD = 56px` to the top/left: fits → centred with space on all four
+  sides; does not fit → one pad below the header and the rest is one drag away.
+  `camTouched` latches on the first user pan/zoom so a later render never
+  re-centres a board the user has deliberately moved.
+- **Wheel = Figma's rules.** Plain wheel pans `deltaX/deltaY`; Ctrl/Cmd+wheel
+  zooms under the pointer (a trackpad pinch arrives as ctrl+wheel, so it takes
+  the same path). A wheel over an element that scrolls *itself* — the message
+  list, a panel — is left alone rather than having its scroll stolen.
+- **Zoom is anchored**, not scaled about the origin: the world point under the
+  pointer is held in place by moving the camera to compensate.
+- **Panning kept its own sign.** A scroll offset and a camera offset push the
+  content in *opposite* directions, so the old `sl - (c - x)` becomes
+  `camX + (c - x)`. Written the other way round, dragging down pulls the board
+  away from you — caught by test, documented next to the formula.
+- **`foldOutOfView()` hangs off the camera now**, not a `scroll` event (there
+  isn't one). It inverts the camera (`top = -camY / zoom`) so the slack stays
+  140 *screen* pixels, and it runs after every camera write, which still
+  converges: a folded explain loses `.expanded`, so the next pass has nothing
+  to collapse.
+
+**The library: `@use-gesture/vanilla` 10.3.1** (MIT, poimandres/pmndrs — the
+zustand/react-spring team; 4.3 KB + 11 KB core, one transitive dep, ESM only).
+It supplies **wheel and pinch only**; this module still owns the camera and the
+drag-to-pan rules, because those are app policy, not device decoding.
+
+- Served straight from `node_modules` by a new `GET /lib/use-gesture` route in
+  `server.js`, resolved by an **import map** in `index.html` — so the no-build-
+  step rule holds. All five bare specifiers verified to resolve to real `.esm.js`
+  files; the package's own imports are relative.
+- Its ESM is unbundled, so the bundler guards are still in there — every dev
+  warning reads `process.env.NODE_ENV`. A bundler would have inlined
+  `'production'`; instead `<head>` defines that object before the module graph
+  is fetched (checked: nothing else on any page reads `process`).
+- **`pinchOnWheel: false` is mandatory.** It defaults to `true`, which puts the
+  pinch recogniser on the wheel as well — one Ctrl+wheel notch then zoomed
+  *twice*, 100 % → 232 % instead of 116 %. Wheel is ours; pinch is touch.
+- **Why not a canvas renderer?** Konva / Fabric / PixiJS / litegraph all draw
+  pixels, and graph nodes host **live DOM** — the real chat area and the explain
+  panels are *moved* into them. react-flow/tldraw/Rete are React- or
+  rewrite-shaped. `anvaka/panzoom` owns the transform (fights the camera) and
+  `d3-zoom` drags five d3 packages behind it. `@use-gesture` is the one piece
+  that is genuinely hard to hand-roll (trackpad + multi-touch recognition) and
+  nothing else.
+
+**Verified in-browser (0 console errors on `/`, `/app`, `/workspaces`)**
+
+- Two explain containers open → `expanded: 2`, **nothing above the viewport
+  top**, `minTop: 0`, camera `translate(56px, 56px) scale(1)` — the reported
+  bug, gone.
+- Drag down 300 px → camera `+300`, board follows the hand, `.panning`
+  cleared, `scrollTop/scrollLeft` stay `0`.
+- Plain wheel `(-25, 120)` → camera `(25, -120)`, exact. One Ctrl+wheel notch →
+  `100 % → 116 %` = `1.0015^100`, exact. Zoom-out ladder → `30 %` still hands
+  the window to `#ws-layer`; rail label click returns to `100 %`.
+- Wheel over a real inner scroller (`1138×541` message list): default **not**
+  prevented, board unchanged. Wheel on the bare board: prevented, board moves.
+- Mouse drag, **touch drag**, Space+drag and middle-drag all pan; node and
+  conversation clicks still fire (pointerdown is only cancelled for non-mouse).
+
+---
+
 ## 3. G5–G8 — Auth, workspaces, per-user data, BYOK
 
 ### 3.1 Target flow
@@ -611,8 +712,8 @@ scheme (verified: light-visit → `/app` → still light).
 | 2026-10-03 | `interactions.js` delegated handlers extracted behind `attachExplainHandlers(host)` — one body, two hosts (`#explain-panels` and the node layer). |
 | 2026-10-03 | `showSidebar(force)`: Library/Settings force it open in graph mode; explanation creation does not (explanations are nodes). |
 | 2026-10-03 | Scroll-collapse **never re-opens on its own** (140px slack) so it cannot fight the user. |
-| 2026-10-03 | **Zoom via a wrapper element** (`#graph-zoomer` sized `base × zoom`) + `transform: scale()` on the canvas, so scrollbars match the paint and no child coordinate system changes. |
-| 2026-10-03 | **Pan by writing scroll offsets**, not a transform — composes with native scrolling. Left-drag only from the empty board, plus middle-drag and Space+drag. |
+| 2026-10-03 | **Zoom via a wrapper element** (`#graph-zoomer` sized `base × zoom`) + `transform: scale()` on the canvas, so scrollbars match the paint and no child coordinate system changes. → **Superseded 2026-10-04 by the camera decision below** (no scrollbars left to match). |
+| 2026-10-03 | **Pan by writing scroll offsets**, not a transform — composes with native scrolling. Left-drag only from the empty board, plus middle-drag and Space+drag. → **Superseded 2026-10-04**; a scroll box has a top, and content above it could never be reached. |
 | 2026-10-03 | **All colour lives in one token block**; `:root` is dark, `[data-theme='light']` overrides. Zero raw colour declarations outside it (verified by scanning the CSSOM). |
 | 2026-10-03 | Theme default = OS preference, manual choice wins and persists (`lb.theme`); applied inline in `<head>` to avoid a flash. |
 | 2026-10-03 | Texture only on *backdrop* surfaces — panels stay flat so they read as cards on a desk. Graph canvas additionally gets a dot grid. |
@@ -623,6 +724,10 @@ scheme (verified: light-visit → `/app` → still light).
 | 2026-10-04 | **Accuracy = a pure grounding layer + an audit pass.** `grounding.js` has zero imports (the `export-format.js` pattern) so `npm run check:grounding` can assert on it from node; every answer index goes through a temperature-0 read of the source that must quote a sentence. No unverified key reaches the user. |
 | 2026-10-04 | **Shuffle the options before the audit.** A live run came back 7/7 with the key in slot 0 — a model writing `correct` as a verbatim copy emits that option first, so the test was guessable and looked broken even where every key was right. |
 | 2026-10-04 | **Quiz cache carries `v: QUIZ_VERSION`.** A fingerprint only moves when the *conversation* changes, so a pipeline fix would otherwise leave every pre-existing test with its inaccurate keys forever. Version-bump the quiz (one regeneration each, once); do **not** version-bump summaries, which would silently burn quota on every open. |
+| 2026-10-04 | **The graph viewport is a camera, not a scroll box** (§2.9). `#graph-scroll` is `overflow: clip` — *clip*, because `hidden` still makes it a scroll container and a transformed canvas lands in its scrollable overflow — and `#graph-canvas` carries `translate(camX, camY) scale(zoom)`. No content box ⇒ no edges ⇒ space in every direction. Supersedes both the `#graph-zoomer` wrapper and scroll-offset panning. |
+| 2026-10-04 | **A board nobody has touched is framed for them**: centred, and never closer than 56 px to the top/left, then `camTouched` latches on the first user pan/zoom so a later render can never re-centre a board they deliberately moved. |
+| 2026-10-04 | **`liftBoard()`'s guard was inverted** (`lift <= 0` where `lift = min(0, min y)` is always ≤ 0) — a no-op since `d37659e`, and the actual cause of explanations sitting under the header. Now `lift >= 0`. Fix this independently of the canvas work: it is the bug, the camera is the experience. |
+| 2026-10-04 | **One library, deliberately narrow: `@use-gesture` for wheel + pinch only.** Device decoding (trackpad, multi-touch) is the hard part and worth buying; the camera maths and the pan rules (Space / middle button / empty board, click suppression) are app policy and stay here. A canvas renderer — Konva/Pixi/litegraph/react-flow — would have to *redraw the live DOM* the nodes host, and `panzoom`/`d3-zoom` own the transform we just took over. Served from `node_modules` by a new `/lib/use-gesture` route + an import map, so there is still no build step. **`pinchOnWheel: false` or Ctrl+wheel zooms twice** (100 % → 232 %). |
 
 ---
 

@@ -27,6 +27,11 @@ import { showSidebar, updateCollapsed } from './explain-ui.js';
 import { attachExplainHandlers } from './interactions.js';
 import { $, explainPanels, state } from './state.js';
 import { makeSelectionHandlers } from './selection.js';
+/* The wheel and pinch recognisers for the canvas. Kept deliberately small: this
+ * module still owns the camera (the actual pan/zoom maths) and the drag-to-pan
+ * rules, @use-gesture just decodes the input devices. Resolved by the import
+ * map in index.html — there is no build step. */
+import { PinchGesture, WheelGesture } from '@use-gesture/vanilla';
 
 /* ---------------- refs ---------------- */
 
@@ -41,7 +46,6 @@ const railSettings = $('rail-settings');
 const railZoomIn = $('rail-zoom-in');
 const railZoomOut = $('rail-zoom-out');
 const railZoomLabel = $('rail-zoom-label');
-const graphZoomer = $('graph-zoomer');
 
 const mainRow = $('main-row');
 const resizeHandle = $('resize-handle');
@@ -233,10 +237,17 @@ function layout(model) {
     });
   }
 
+  /*
+   * lift is min(0, smallest y), so it is 0 when the board is already clear of
+   * the top edge and NEGATIVE when something overhangs it. The guard used to be
+   * `lift <= 0`, which returned early in exactly that second case — making this
+   * a no-op since the day it was written, and the reason an opened explanation
+   * could end up above the viewport with no way to drag it back down.
+   */
   const liftBoard = () => {
     let lift = 0;
     for (const p of pos.values()) if (p.y < lift) lift = p.y;
-    if (lift <= 0) return 0;
+    if (lift >= 0) return 0;      // nothing overhangs the top edge
     for (const p of pos.values()) p.y -= lift;
     y -= lift;
     return lift;
@@ -617,34 +628,63 @@ function syncHosts(model) {
   }
 }
 
-/* ---------------- zoom & pan ---------------- */
+/* ---------------- camera (the infinite canvas) ---------------- */
 
+/*
+ * There is no scroll box any more. #graph-canvas carries a camera and is drawn
+ * at  world * zoom + (camX, camY),  so the board has no edges: it can be dragged
+ * past every side and brought back, which is the point of a Figma-style canvas.
+ * The old implementation scrolled a content box, and a content box has a top —
+ * anything the layout placed above the world origin was simply unreachable,
+ * wedged behind the header with no way to pull it down.
+ *
+ * #graph-canvas keeps its real (unscaled) size and only its transform changes,
+ * so every child sized `inset: 0` — the SVG edge layer, the node layer — stays in
+ * unscaled world coordinates and no other code has to do coordinate maths.
+ */
 const ZOOM_KEY = 'lb.zoom';
 const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 2.5;
 const ZOOM_RATIO = 1.2;   // one press, one notch on the ladder
+const CAM_PAD = 56;       // a bare board never starts flush against the header
 
 let zoom = 1;
+let camX = 0;
+let camY = 0;
 let baseW = 0;            // unscaled canvas size, straight from layout()
 let baseH = 0;
+let camTouched = false;   // once the user moves it, stop re-centring for them
+let lastZoomNotified = -1;
 
 const clampZoom = (z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
 
 /*
- * #graph-zoomer's box is the SCALED size, so the scrollbars agree with what
- * is painted; #graph-canvas keeps its real size and is only painted larger.
- * That keeps every child that is sized `inset: 0` (the SVG edge layer, the
- * node layer) in unscaled coordinates — no coordinate maths anywhere else.
+ * A board nobody has touched yet is centred in the viewport, and never comes
+ * closer than CAM_PAD to the top or left. So: when it fits, it is centred with
+ * space on all four sides; when it does not, it starts one pad below the header
+ * and the rest is one drag away — never off the top edge with nowhere to go.
  */
-function applyZoom() {
-  graphZoomer.style.width = (baseW * zoom) + 'px';
-  graphZoomer.style.height = (baseH * zoom) + 'px';
-  graphCanvas.style.transform = zoom === 1 ? '' : 'scale(' + zoom + ')';
-  if (railZoomLabel) railZoomLabel.textContent = Math.round(zoom * 100) + '%';
-  /* Tell whoever cares (the workspace layer) that we crossed out of the
-   * conversation level. Same indirection as state.onGraphChange: the zoom
-   * owner never imports its observers, so there is no module cycle. */
-  if (state.onZoomChange) state.onZoomChange(zoom);
+function placeCamera() {
+  if (camTouched) return;
+  camX = Math.round(Math.max(CAM_PAD, (graphScroll.clientWidth - baseW * zoom) / 2));
+  camY = Math.round(Math.max(CAM_PAD, (graphScroll.clientHeight - baseH * zoom) / 2));
+}
+
+function applyCamera() {
+  graphCanvas.style.transform =
+    camX === 0 && camY === 0 && zoom === 1
+      ? ''
+      : 'translate(' + camX + 'px, ' + camY + 'px) scale(' + zoom + ')';
+  if (zoom !== lastZoomNotified) {
+    lastZoomNotified = zoom;
+    if (railZoomLabel) railZoomLabel.textContent = Math.round(zoom * 100) + '%';
+    /* Tell whoever cares (the workspace layer) that we crossed out of the
+     * conversation level. Same indirection as state.onGraphChange: the zoom
+     * owner never imports its observers, so there is no module cycle. Only on a
+     * real zoom change — panning rewrites this transform every frame. */
+    if (state.onZoomChange) state.onZoomChange(zoom);
+  }
+  foldOutOfView();
 }
 
 /* Zoom around a point of the viewport so what you are looking at stays put.
@@ -652,33 +692,73 @@ function applyZoom() {
 function setZoom(next, cx, cy) {
   next = clampZoom(next);
   if (next === zoom) return;
-  const el = graphScroll;
-  const ax = cx == null ? el.clientWidth / 2 : cx;
-  const ay = cy == null ? el.clientHeight / 2 : cy;
-  const px = (el.scrollLeft + ax) / zoom;
-  const py = (el.scrollTop + ay) / zoom;
-
+  const ax = cx == null ? graphScroll.clientWidth / 2 : cx;
+  const ay = cy == null ? graphScroll.clientHeight / 2 : cy;
+  /* Hold the world point sitting under (ax, ay) where it is by moving the
+   * camera to cancel out the scale change. */
+  const wx = (ax - camX) / zoom;
+  const wy = (ay - camY) / zoom;
   zoom = next;
-  applyZoom();
-
-  el.scrollLeft = px * zoom - ax;
-  el.scrollTop = py * zoom - ay;
+  camX = ax - wx * zoom;
+  camY = ay - wy * zoom;
+  applyCamera();
   try { localStorage.setItem(ZOOM_KEY, String(zoom)); } catch { /* private mode */ }
 }
 
-/* Ctrl/Cmd + wheel zooms; a plain wheel keeps scrolling natively. */
-function onWheel(e) {
+/* True when the wheel landed on something that scrolls itself — the message
+ * list, a panel — in which case the wheel belongs to that element, not to us. */
+function overScroller(target) {
+  let el = target && target.nodeType === 1 ? target : null;
+  while (el && el !== graphCanvas && el !== graphScroll) {
+    if (el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2) return true;
+    el = el.parentElement;
+  }
+  return false;
+}
+
+/*
+ * Figma's wheel rules, with the device decoding done by @use-gesture: a plain
+ * wheel drags the board along either axis, Ctrl/Cmd+wheel zooms under the
+ * pointer. A trackpad pinch arrives as ctrl+wheel, so it lands here too.
+ */
+function onWheel(st) {
   if (state.view !== 'graph') return;
-  if (!e.ctrlKey && !e.metaKey) return;
+  const e = st.event;
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    const r = graphScroll.getBoundingClientRect();
+    camTouched = true;
+    setZoom(zoom * Math.pow(1.0015, -e.deltaY), e.clientX - r.left, e.clientY - r.top);
+    return;
+  }
+  if (overScroller(e.target)) return;   // the message list is scrolling itself
   e.preventDefault();
+  camX -= e.deltaX;
+  camY -= e.deltaY;
+  camTouched = true;
+  applyCamera();
+}
+
+let pinchBase = 1;
+
+/* Two fingers scale the board around their centroid, same as ctrl+wheel.
+ * @use-gesture does the two-touch bookkeeping, so the centroid is not ours to
+ * get wrong. */
+function onPinch(st) {
+  if (state.view !== 'graph') return;
+  if (st.first) pinchBase = zoom;
   const r = graphScroll.getBoundingClientRect();
-  setZoom(zoom * Math.pow(1.0015, -e.deltaY), e.clientX - r.left, e.clientY - r.top);
+  const o = st.origin;
+  camTouched = true;
+  setZoom(pinchBase * (st.offset ? st.offset[0] : 1),
+    o ? o[0] - r.left : r.width / 2,
+    o ? o[1] - r.top : r.height / 2);
 }
 
 /* --- drag-to-pan (Figma style) --- */
 
-let pan = null;             // { id, x, y, cx, cy, sl, st, moved } while a drag is live
-let panFrame = 0;           // rAF token: one scroll write per frame, not one per event
+let pan = null;             // { id, x, y, cx, cy, camX, camY, moved } during a drag
+let panFrame = 0;           // rAF token: one camera write per frame, not one per event
 let panTimer = 0;           // ...with a timer fallback for hidden tabs (see applyPan)
 let spaceDown = false;
 let swallowUntil = 0;       // a drag must not also fire the underlying click
@@ -689,32 +769,38 @@ const isTyping = (t) => !!t && (
 );
 
 function canPanFrom(e) {
-  if (e.pointerType && e.pointerType !== 'mouse') return false; // touch keeps native scroll
   if (state.view !== 'graph') return false;
   if (e.button === 1) return true;                 // middle button: anywhere
-  if (e.button !== 0) return false;
+  if (e.button !== 0) return false;                // primary button only
   if (spaceDown) return true;                      // space held: anywhere
-  return !e.target.closest('.gnode');              // left button: the board only
+  return !e.target.closest('.gnode');              // primary: the board only
 }
 
 function onPointerDown(e) {
   if (!canPanFrom(e)) return;
+  /*
+   * Touch used to ride on the board's native scroll, and #graph-scroll is
+   * `overflow: clip` now — there is nothing left to scroll. Claim the gesture
+   * instead so the browser starts a pan rather than a text selection. Mouse is
+   * left alone: it has never needed it, and cancelling pointerdown there would
+   * swallow the clicks the node layer depends on.
+   */
+  if (e.pointerType && e.pointerType !== 'mouse' && e.cancelable) e.preventDefault();
   pan = { id: e.pointerId, x: e.clientX, y: e.clientY,
           cx: e.clientX, cy: e.clientY,
-          sl: graphScroll.scrollLeft, st: graphScroll.scrollTop, moved: false };
+          camX: camX, camY: camY, moved: false };
 }
 
 /*
- * The board is dragged by writing scrollLeft/scrollTop, and that relayout is
- * not cheap — the canvas, the SVG edge layer and the scaled nodes all have to
- * be repositioned. A modern mouse reports pointermove at 1000Hz, so doing the
- * write inline spends a dozen full relayouts on a single frame's worth of
- * movement and the drag stutters or stalls outright. Keep only the newest
- * position and spend one relayout per frame on it.
+ * The board is dragged by rewriting the camera, and every rewrite repaints the
+ * canvas, the SVG edge layer and all the scaled nodes. A modern mouse reports
+ * pointermove at 1000Hz, so doing the write inline spends a dozen repaints on a
+ * single frame's worth of movement and the drag stutters or stalls outright.
+ * Keep only the newest position and spend one repaint per frame on it.
  *
  * rAF is the scheduler that lands just before paint, but a hidden tab never
  * runs rAF — arm a timer alongside it so the drag still lands, exactly as
- * schedule() does above. Whichever fires first cancels the other.
+ * schedule() does. Whichever fires first cancels the other.
  */
 function applyPan() {
   if (panFrame || panTimer) return;
@@ -724,8 +810,13 @@ function applyPan() {
     panFrame = 0;
     panTimer = 0;
     if (!pan) return;
-    graphScroll.scrollLeft = pan.sl - (pan.cx - pan.x);
-    graphScroll.scrollTop = pan.st - (pan.cy - pan.y);
+    /* NOTE the sign. A scroll offset and a camera offset push the content in
+     * opposite directions: more scrollTop slides the board up, more camY slides
+     * it down. So the old `st - (c - x)` becomes `camX + (c - x)` here — get
+     * that backwards and dragging pulls the board AWAY from you. */
+    camX = pan.camX + (pan.cx - pan.x);
+    camY = pan.camY + (pan.cy - pan.y);
+    applyCamera();
   };
   panFrame = requestAnimationFrame(run);
   panTimer = setTimeout(run, 16);
@@ -741,8 +832,9 @@ function endPan(e) {
    * comes up would otherwise be cancelled, leaving the board a few pixels
    * behind where the pointer actually let go. */
   if (moved) {
-    graphScroll.scrollLeft = pan.sl - (pan.cx - pan.x);
-    graphScroll.scrollTop = pan.st - (pan.cy - pan.y);
+    camX = pan.camX + (pan.cx - pan.x);
+    camY = pan.camY + (pan.cy - pan.y);
+    applyCamera();
   }
   pan = null;
   graphScroll.classList.remove('panning');
@@ -760,6 +852,9 @@ function onPointerMove(e) {
   if (!pan.moved) {
     if (Math.abs(pan.cx - pan.x) < 4 && Math.abs(pan.cy - pan.y) < 4) return;
     pan.moved = true;
+    /* From here the user owns the framing: a render must not re-centre the
+     * board out from under a drag that is in progress. */
+    camTouched = true;
     graphScroll.classList.add('panning');
     try { graphScroll.setPointerCapture(e.pointerId); } catch { /* fine */ }
   }
@@ -845,7 +940,8 @@ function render() {
   graphCanvas.style.height = H + 'px';
   baseW = W;
   baseH = H;
-  applyZoom();
+  placeCamera();               // only until the user claims the framing
+  applyCamera();
   drawEdges(model, pos);
   syncHosts(model);
 
@@ -1053,12 +1149,16 @@ function onGraphClick(e) {
  * Explanations parked far outside the viewport fold back to their chip, which
  * is what keeps a long session scannable. Only ever collapses (never
  * re-opens), so it cannot fight the user; a render already pending wins.
+ *
+ * There is no scroll event to hang this off any more — the camera is a
+ * transform — so it runs straight after every camera write instead.
  */
-function onScroll() {
+function foldOutOfView() {
   if (state.view !== 'graph') return;
-  /* Node geometry is in unscaled canvas coordinates; the scroll offsets are
-   * in scaled ones. Divide so the 140px slack stays 140 SCREEN pixels. */
-  const top = graphScroll.scrollTop / zoom;
+  /* Node geometry is in unscaled world coordinates; the camera puts world y at
+   * screen y = world * zoom + camY. Invert that so the slack stays 140 SCREEN
+   * pixels rather than 140 world ones. */
+  const top = -camY / zoom;
   const bot = top + graphScroll.clientHeight / zoom;
   const slack = 140 / zoom;
   let dirty = false;
@@ -1131,8 +1231,19 @@ export function initGraph() {
     const panel = el && el.closest('.ex-container');
     return panel ? panel.dataset.id : '';
   });
-  graphScroll.addEventListener('scroll', onScroll, { passive: true });
-  graphScroll.addEventListener('wheel', onWheel, { passive: false });
+  /*
+   * @use-gesture attaches the recognisers itself; `{ passive: false }` is what
+   * lets the handler preventDefault a wheel it actually acts on, instead of
+   * handing it to the browser. There is no 'scroll' listener any more — the
+   * scroll box is gone with it.
+   *
+   * `pinchOnWheel: false` matters: pinchOnWheel defaults to TRUE, which would
+   * put the pinch recogniser on the wheel too and let ctrl+wheel zoom twice —
+   * once here and once in onPinch. Wheel is ours, pinch is for touchscreens.
+   */
+  new WheelGesture(graphScroll, onWheel, { eventOptions: { passive: false } });
+  new PinchGesture(graphScroll, onPinch,
+    { eventOptions: { passive: false }, pinchOnWheel: false });
   graphScroll.addEventListener('pointerdown', onPointerDown);
   graphScroll.addEventListener('pointermove', onPointerMove);
   graphScroll.addEventListener('pointerup', endPan);
@@ -1142,6 +1253,9 @@ export function initGraph() {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', () => { spaceDown = false; graphScroll.classList.remove('can-pan'); });
+  /* The framing follows the viewport until the user claims it: a resize re-runs
+   * render(), which re-centres (placeCamera) and re-folds what fell outside. */
+  window.addEventListener('resize', schedule);
   railZoomIn && railZoomIn.addEventListener('click', () => setZoom(zoom * ZOOM_RATIO));
   railZoomOut && railZoomOut.addEventListener('click', () => setZoom(zoom / ZOOM_RATIO));
   railZoomLabel && railZoomLabel.addEventListener('click', () => setZoom(1));
@@ -1158,7 +1272,7 @@ export function initGraph() {
     const saved = parseFloat(localStorage.getItem(ZOOM_KEY));
     if (saved) zoom = clampZoom(saved);
   } catch { /* private mode */ }
-  applyZoom();
+  applyCamera();
   viewToggle.addEventListener('click', () => setView(state.view === 'graph' ? 'list' : 'graph'));
   railSettings.addEventListener('click', () => settingsBtn.click());
   applyLabel();

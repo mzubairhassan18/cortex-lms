@@ -251,11 +251,10 @@
 
     <section id="graph-view" class="hidden" aria-label="Graph view">
       <div id="graph-scroll">
-        <!-- #graph-zoomer carries the zoom scale: its box is the SCALED size
-             (so the scrollbars match what is painted) while #graph-canvas
-             keeps its unscaled size and is simply painted larger. -->
-        <div id="graph-zoomer">
-          <div id="graph-canvas">
+        <!-- #graph-canvas carries the CAMERA: JS writes translate(x,y) scale(k)
+             onto it, so the board can be dragged past every edge — an infinite
+             canvas like Figma, not a scroll box with sides you can hit. -->
+        <div id="graph-canvas">
           <svg id="graph-edges" aria-hidden="true">
             <defs>
               <marker id="garrow" viewBox="0 0 10 10" refX="8.5" refY="5"
@@ -271,7 +270,6 @@
           </svg>
           <div id="graph-nodes"></div>
         </div><!-- /#graph-canvas -->
-      </div><!-- /#graph-zoomer -->
       </div><!-- /#graph-scroll -->
       <!-- Zoomed out past ~50%: the conversations give way to the workspaces
            that hold them. Lives outside #graph-scroll so it never scales. -->
@@ -355,6 +353,32 @@
   </div>
 
   <script src="/vendor/marked.min.js"></script>
+  <!--
+    @use-gesture is served unbundled (there is no build step), so its dev guards
+    are still in place: every warning reads `process.env.NODE_ENV`. A bundler
+    would have inlined 'production' there, so define the object it reads instead.
+    Classic script, which means it runs before the module graph is fetched.
+    Nothing else on this page reads `process` — checked.
+  -->
+  <script>window.process = window.process || { env: { NODE_ENV: 'production' } };</script>
+  <!--
+    The canvas gesture layer (@use-gesture: wheel-pan, pinch-zoom, pointer
+    tracking for the Figma-style board). There is deliberately no build step, so
+    the bare specifiers js/graph.js imports are resolved here and served from
+    node_modules by the /lib/use-gesture route in server.js. Import maps must
+    appear before the first module script.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@use-gesture/vanilla": "/lib/use-gesture/vanilla/dist/use-gesture-vanilla.esm.js",
+      "@use-gesture/core": "/lib/use-gesture/core/dist/use-gesture-core.esm.js",
+      "@use-gesture/core/actions": "/lib/use-gesture/core/actions/dist/use-gesture-core-actions.esm.js",
+      "@use-gesture/core/utils": "/lib/use-gesture/core/utils/dist/use-gesture-core-utils.esm.js",
+      "@use-gesture/core/types": "/lib/use-gesture/core/types/dist/use-gesture-core-types.esm.js"
+    }
+  }
+  </script>
   <script type="module" src="/js/main.js"></script>
 </body>
 </html>

@@ -8,6 +8,7 @@
     "check:grounding": "node --experimental-default-type=module scripts/grounding-check.mjs"
   },
   "dependencies": {
+    "@use-gesture/vanilla": "^10.3.1",
     "express": "^4.19.2",
     "htm": "^3.1.1",
     "mammoth": "^1.13.0",

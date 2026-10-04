@@ -79,16 +79,18 @@ body.graph-mode .summary-node #summary-overlay {
 #graph-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: 28px 36px 40px;
+  position: relative;
+  /* An INFINITE canvas, not a scroll box: the camera is #graph-canvas's
+     transform (translate + scale), so there are no edges to hit and no
+     scrollbars to show. `clip` rather than `hidden` — hidden still makes this a
+     scroll container, and a transformed canvas would show up as scrollable
+     overflow there, so touch or an auto-scroll could move the content on top of
+     the camera. clip means there is nothing to scroll at all. */
+  overflow: clip;
 }
 
-/* Sized in JS to the measured bounding box of every node, plus padding. */
-
-/* The zoom wrapper: JS writes its box as (unscaled size × zoom) so the
- * scrollbars match what is painted, while #graph-canvas keeps its real
- * size and is simply painted larger. */
-#graph-zoomer { position: relative; }
+/* Sized in JS to the measured bounding box of every node. It is only ever
+   painted — #graph-canvas's transform is what moves it. */
 
 #graph-canvas {
   position: relative;
@@ -103,6 +105,9 @@ body.graph-mode .summary-node #summary-overlay {
 #graph-scroll.panning,
 #graph-scroll.panning #graph-canvas { cursor: grabbing; }
 #graph-scroll.panning { user-select: none; }
+/* While the board is being dragged it gets its own compositor layer, so the
+   camera transform moves pixels instead of re-rasterising the whole tree. */
+#graph-scroll.panning #graph-canvas { will-change: transform; }
 
 #graph-edges {
   position: absolute;

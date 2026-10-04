@@ -147,6 +147,14 @@ const IDLE_MS = Number(process.env.IDLE_MS) || 45000;
 app.use(express.json({ limit: '16mb' })); // room for uploaded files (base64)
 // index:false so "/" can be the marketing landing page instead of the app.
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+/*
+ * The canvas gesture layer (@use-gesture) is imported by js/graph.js as a bare
+ * specifier. There is no bundler, so index.html's import map points at these
+ * URLs and this route resolves them straight out of node_modules — nothing is
+ * vendored or checked in, `npm install` is enough.
+ */
+app.use('/lib/use-gesture',
+  express.static(path.join(__dirname, 'node_modules', '@use-gesture'), { index: false }));
 
 /* Route map (auth gates arrive in P2 and wrap /app):
  *   /      -> public landing page
