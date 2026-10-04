@@ -677,7 +677,9 @@ function onWheel(e) {
 
 /* --- drag-to-pan (Figma style) --- */
 
-let pan = null;             // { id, x, y, sl, st, moved } while a drag is live
+let pan = null;             // { id, x, y, cx, cy, sl, st, moved } while a drag is live
+let panFrame = 0;           // rAF token: one scroll write per frame, not one per event
+let panTimer = 0;           // ...with a timer fallback for hidden tabs (see applyPan)
 let spaceDown = false;
 let swallowUntil = 0;       // a drag must not also fire the underlying click
 
@@ -698,13 +700,50 @@ function canPanFrom(e) {
 function onPointerDown(e) {
   if (!canPanFrom(e)) return;
   pan = { id: e.pointerId, x: e.clientX, y: e.clientY,
+          cx: e.clientX, cy: e.clientY,
           sl: graphScroll.scrollLeft, st: graphScroll.scrollTop, moved: false };
+}
+
+/*
+ * The board is dragged by writing scrollLeft/scrollTop, and that relayout is
+ * not cheap — the canvas, the SVG edge layer and the scaled nodes all have to
+ * be repositioned. A modern mouse reports pointermove at 1000Hz, so doing the
+ * write inline spends a dozen full relayouts on a single frame's worth of
+ * movement and the drag stutters or stalls outright. Keep only the newest
+ * position and spend one relayout per frame on it.
+ *
+ * rAF is the scheduler that lands just before paint, but a hidden tab never
+ * runs rAF — arm a timer alongside it so the drag still lands, exactly as
+ * schedule() does above. Whichever fires first cancels the other.
+ */
+function applyPan() {
+  if (panFrame || panTimer) return;
+  const run = () => {
+    if (panFrame) cancelAnimationFrame(panFrame);
+    if (panTimer) clearTimeout(panTimer);
+    panFrame = 0;
+    panTimer = 0;
+    if (!pan) return;
+    graphScroll.scrollLeft = pan.sl - (pan.cx - pan.x);
+    graphScroll.scrollTop = pan.st - (pan.cy - pan.y);
+  };
+  panFrame = requestAnimationFrame(run);
+  panTimer = setTimeout(run, 16);
 }
 
 function endPan(e) {
   if (!pan) return;
   if (e && e.pointerId != null && e.pointerId !== pan.id) return;
   const moved = pan.moved;
+  if (panFrame) { cancelAnimationFrame(panFrame); panFrame = 0; }
+  if (panTimer) { clearTimeout(panTimer); panTimer = 0; }
+  /* Land the final position inline: a frame still pending when the button
+   * comes up would otherwise be cancelled, leaving the board a few pixels
+   * behind where the pointer actually let go. */
+  if (moved) {
+    graphScroll.scrollLeft = pan.sl - (pan.cx - pan.x);
+    graphScroll.scrollTop = pan.st - (pan.cy - pan.y);
+  }
   pan = null;
   graphScroll.classList.remove('panning');
   if (e && e.pointerId != null) {
@@ -715,17 +754,16 @@ function endPan(e) {
 
 function onPointerMove(e) {
   if (!pan || e.pointerId !== pan.id) return;
+  pan.cx = e.clientX;
+  pan.cy = e.clientY;
   if (!e.buttons) { endPan(e); return; }           // released outside our reach
-  const dx = e.clientX - pan.x;
-  const dy = e.clientY - pan.y;
   if (!pan.moved) {
-    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    if (Math.abs(pan.cx - pan.x) < 4 && Math.abs(pan.cy - pan.y) < 4) return;
     pan.moved = true;
     graphScroll.classList.add('panning');
     try { graphScroll.setPointerCapture(e.pointerId); } catch { /* fine */ }
   }
-  graphScroll.scrollLeft = pan.sl - dx;            // grab the board and drag it
-  graphScroll.scrollTop = pan.st - dy;
+  applyPan();                                       // grab the board and drag it
 }
 
 /* A drag should not also activate whatever node it ended over. */

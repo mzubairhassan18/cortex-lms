@@ -1,5 +1,7 @@
 <!DOCTYPE html>
-<html lang="en">
+<!-- data-boot: the boot overlay below is up from the very first paint until
+     js/main.js finishes init(). Removing this attribute by hand reveals the UI. -->
+<html lang="en" data-boot>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -18,6 +20,14 @@
           ? 'light' : 'dark';
       }
       document.documentElement.setAttribute('data-theme', t);
+
+      /* Boot-overlay watchdog, mirrored by endBoot() in js/main.js — keep the
+       * attribute name in sync. If boot never completes (a module failed to
+       * load, a fetch hangs), reveal the app anyway instead of leaving the
+       * loader up forever. */
+      setTimeout(function () {
+        document.documentElement.removeAttribute('data-boot');
+      }, 8000);
     })();
   </script>
 </head>
@@ -64,6 +74,28 @@
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4L17.5 7M10 11v5.5M14 11v5.5"/></symbol>
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15"/></symbol>
   </svg>
+
+  <!--
+    Boot overlay — the ONLY thing painted until init() finishes.
+
+    It is markup, not injected JS, and it sits in <html data-boot>, so it is on
+    screen from the first frame. Without it the list layout paints for half a
+    second before the remembered graph view takes over, which reads as a
+    flicker on every reload.
+
+    States, all driven off the data-boot attribute set in <head>:
+        [data-boot]          opaque splash, #app / #ws-page are invisible
+        [data-boot='out']    app revealed underneath, splash fading out
+        (attribute gone)     #boot is display:none — the app owns the screen
+  -->
+  <div id="boot">
+    <div class="boot-in">
+      <svg class="ico boot-mark" aria-hidden="true"><use href="#i-graph"></use></svg>
+      <span class="boot-name">Cortex</span>
+      <span class="boot-bar" aria-hidden="true"><i></i></span>
+      <span class="boot-hint">Loading your workspace…</span>
+    </div>
+  </div>
 
   <div id="app">
 

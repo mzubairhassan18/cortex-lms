@@ -2,6 +2,7 @@
 import { escapeHtml, renderInline } from './markdown.js';
 import { renderQuiz, renderResults, runQuiz } from './quiz.js';
 import { notesSectionVNode } from './selection.js';
+import { clipHeadTail } from './grounding.js';
 import { $, state, summaryCardSlot, summaryStatus, testBadges, testSection } from './state.js';
 import { cleanHistory, streamChat } from './stream.js';
 import { html, render } from './views.js';
@@ -146,8 +147,13 @@ export function sanitizePoints(lines) {
       .replace(/\*\*/g, '')
       .replace(/^["'“”]+|["'“”]+$/g, '')
       .trim();
-    if (line.length < 12 || line.length > 240) continue;
-    if (hasRepetition(line)) continue;
+    /* Short floors were dropping real facts — "F = 9.8 m/s²" fails a 12-char
+     * cut and a 4-word one, so it could vanish from Key findings while the
+     * rest of the summary still talked about it. Keep the repetition and
+     * preamble guards (those catch genuine model loops), just stop punishing
+     * brevity. */
+    if (line.length < 8 || line.length > 240) continue;
+    if (hasRepetition(line, 3)) continue;
     if (/[:;]$/.test(line)) continue; // heading leftovers
     if (/^(here|sure|below|following|note|notes|summary|overview|certainly)\b/i.test(line)) {
       continue; // model preamble
@@ -214,7 +220,11 @@ export function sanitizeHeadline(s, fallback) {
 /* --- MAP: split the session into small chunks (one topic per unit) --- */
 
 export function buildSummaryChunks(messages, explains) {
-  const clip = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
+  /* Head+TAIL clipping (see clipHeadTail): the conclusion of a long answer is
+   * exactly the part worth summarising — and worth testing on. This is now
+   * the ONLY source either job reads, so the summary and the quiz cannot
+   * disagree about what happened. */
+  const clip = clipHeadTail;
   const units = [];
 
   const main = cleanHistory(messages || []);
@@ -277,40 +287,6 @@ export function buildSummaryChunks(messages, explains) {
   }
   if (cur) chunks.push(cur);
   return chunks;
-}
-
-export function summaryPromptInput(messages, explains) {
-  const clip = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
-  const out = [];
-  const main = cleanHistory(messages || []);
-  if (main.length) {
-    out.push('MAIN CONVERSATION:');
-    for (const m of main.slice(-30)) {
-      out.push(`${m.role === 'user' ? 'Student' : 'Tutor'}: ${clip(m.content, 400)}`);
-    }
-    out.push('');
-  }
-  const nodes = (explains && explains.nodes) || {};
-  const roots = (explains && explains.roots) || [];
-  const seen = new Set();
-  const emit = (id, depth) => {
-    if (seen.has(id) || !nodes[id]) return;
-    seen.add(id);
-    const nd = nodes[id];
-    out.push(`${depth ? 'NESTED EXPLAINER' : 'EXPLAINER'} — selected: "${clip(nd.selection || '', 200)}"`);
-    for (const m of cleanHistory(nd.messages || []).slice(-12)) {
-      out.push(`  ${m.role === 'user' ? 'Student' : 'Tutor'}: ${clip(m.content, 300)}`);
-    }
-    out.push('');
-    for (const c of Object.values(nodes)
-      .filter((x) => x.parentId === id)
-      .sort((a, b) => a.createdAt - b.createdAt)) {
-      emit(c.id, depth + 1);
-    }
-  };
-  for (const r of roots) emit(r, 0);
-  for (const id of Object.keys(nodes)) if (!seen.has(id)) emit(id, 0);
-  return out.join('\n');
 }
 
 export function parseSummary(text) {

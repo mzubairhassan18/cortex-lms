@@ -4,7 +4,8 @@
   "description": "Cortex — an AI learning workspace: chat, explain-in-panel, notes, summaries and quizzes",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check:grounding": "node --experimental-default-type=module scripts/grounding-check.mjs"
   },
   "dependencies": {
     "express": "^4.19.2",

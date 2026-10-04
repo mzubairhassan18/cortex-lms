@@ -211,5 +211,7 @@ export function initWorkspacePage() {
     else open(card.dataset.id);
   });
 
-  load();
+  /* Returned so the caller can hold the boot overlay until the cards are in —
+   * revealing an empty grid is only a slightly better flicker than no loader. */
+  return load();
 }

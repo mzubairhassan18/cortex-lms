@@ -593,7 +593,7 @@ scheme (verified: light-visit → `/app` → still light).
 | Q6 | Migrate the existing 6 local conversations into a workspace? | **open** (P2) |
 | Q7 | "encapsulate under user preferences, no sidebar route, just give a link" — what is this? | **open** |
 | Q8 | Graph view: does it *replace* the list view or coexist forever? | **resolved 2026-10-03 — coexist behind the header toggle** (brief: "list view ⇄ graph view") |
-| Q9 | Summary/quiz accuracy rework — start where? | **open** (plan in §9; recommended Phases 1+2 together, awaiting go-ahead) |
+| Q9 | Summary/quiz accuracy rework — start where? | **resolved 2026-10-04 — Phases 1+2 (+3) implemented and live-verified, §9.3**; only P4 (pin a model / BYOK) still open, blocked on P2 |
 
 ---
 
@@ -618,10 +618,15 @@ scheme (verified: light-visit → `/app` → still light).
 | 2026-10-03 | Texture only on *backdrop* surfaces — panels stay flat so they read as cards on a desk. Graph canvas additionally gets a dot grid. |
 | 2026-10-03 | `schedule()` arms a 120 ms timer beside rAF: a hidden tab never runs rAF, which would otherwise freeze graph state (and collapse-on-scroll) until the window is shown. |
 | 2026-10-04 | **Summary export = one block list, three writers** (`export-format.js` has *no imports*, so it is testable outside a browser and can never create a cycle). PDF is hand-written base-14 Helvetica and DOCX is a STORED zip — no library, no build step, no network, nothing to install. |
+| 2026-10-04 | **Boot = one loader, never the list view.** `data-boot` lives in the markup so the very first paint is already the loader; `endBoot()` runs in `init()`'s `finally`. `#app` is `visibility:hidden` (still laid out) so the reveal costs no reflow, and an 8 s `<head>` watchdog means a thrown error can never strand the user on the loader. |
+| 2026-10-04 | **Pan never writes scroll synchronously** — one rAF frame plus a 16 ms timer (`applyPan`/`endPan`), landing the final position inline on `pointerup`. Same rAF-fallback shape `schedule()` already needed for a hidden tab. |
+| 2026-10-04 | **Accuracy = a pure grounding layer + an audit pass.** `grounding.js` has zero imports (the `export-format.js` pattern) so `npm run check:grounding` can assert on it from node; every answer index goes through a temperature-0 read of the source that must quote a sentence. No unverified key reaches the user. |
+| 2026-10-04 | **Shuffle the options before the audit.** A live run came back 7/7 with the key in slot 0 — a model writing `correct` as a verbatim copy emits that option first, so the test was guessable and looked broken even where every key was right. |
+| 2026-10-04 | **Quiz cache carries `v: QUIZ_VERSION`.** A fingerprint only moves when the *conversation* changes, so a pipeline fix would otherwise leave every pre-existing test with its inaccurate keys forever. Version-bump the quiz (one regeneration each, once); do **not** version-bump summaries, which would silently burn quota on every open. |
 
 ---
 
-## 9. Summary & quiz accuracy — **DIAGNOSED 2026-10-04, plan awaiting go-ahead**
+## 9. Summary & quiz accuracy — **IMPLEMENTED + VERIFIED 2026-10-04 (P1.32)**
 
 > User report: *"the questions are not very accurate and the answers are not
 > very accurate … I cross-checked with some other resources, the question I
@@ -692,11 +697,63 @@ A correct user marked wrong. Diagnosis from the code, worst cause first.
   per-request Auto, or let the user BYOK — Gemini/Groq free keys are far
   stronger than the no-key gateways.
 
-**Guardrail:** a script that regenerates summary + quiz for N existing
-conversations and reports how many questions the verifier drops or repairs —
-before/after numbers, not vibes.
+**Guardrail:** numbers, not vibes — a script that feeds the pure layer
+deliberately bad model output and reports what is kept, repaired and dropped.
 
-**Status:** plan presented 2026-10-04. Recommended start: **Phases 1+2
-together** — 1 without 2 still trusts the generator, 2 without 1 drops most of
-the questions because there is no good source to check against.
+### 9.3 Status — **Phases 1 + 2 + 3 implemented, live-verified 2026-10-04 (P1.32)**
+
+| Piece | Where | Status |
+|---|---|---|
+| **P1** per-chunk generation + head/tail clip | `quiz.js`, `summary.js`, `grounding.js#clipHeadTail` | done |
+| **P1** dead `summaryPromptInput()` (root cause #1) | deleted | done |
+| **P2** prose `correct` → index, no match → drop | `grounding.js#keyQuiz`, `resolveAnswer` | done |
+| **P2** audit pass: which option does the source support, with a quote | `quiz.js#QUIZ_VERIFY_SYS`, `auditBatch`, `grounding.js#applyVerdicts` | done |
+| **P2** ambiguity check + snippet stored & shown | `grounding.js#parseVerdicts`, `renderResults` `.res-src` | done |
+| **3.1** quiz temperature 0.8 → 0.4 | `quiz.js#GEN_SAMPLING` | done |
+| **3.2** `sanitizePoints` 12 → 8 chars, `hasRepetition(x,3)` | `summary.js` | done |
+| **3.3** per-source cache | falls out of P1 (chunks are the unit) | done |
+| **position bias** — see below | `grounding.js#shuffleQuestion` | done |
+| **P4** pin one model / BYOK | — | blocked on P2 (Supabase) + a key |
+| live guardrail (regenerate N real conversations) | — | run by hand instead, see numbers below |
+
+**A root cause the diagnosis missed — position bias.** The first live run came
+back with `answer = 0` on **7 of 7** questions: a model writing `correct` as a
+verbatim copy of an option tends to emit that option *first*, so the test was
+guessable and looked broken even where every key was right.
+`shuffleQuestion()` randomises the options (carrying the key with them)
+**before** the audit, so the auditor has to read the source instead of noticing
+a pattern.
+
+**Guardrail — `npm run check:grounding`** → `scripts/grounding-check.mjs`,
+34 checks, zero imports, no network. Pure `grounding.js` fed wrong keys,
+ambiguous options, missing quotes, malformed verdicts and un-shuffled slots,
+then the case the whole phase exists for: *the user who picked the option the
+SOURCE supports now grades correct*. **34 passed, 0 failed.**
+
+**Live verification 2026-10-04** (free routed provider `kilo-auto/free`, no key)
+on a throwaway 12-message conversation, then removed:
+
+- summary → **10 points**; test → `target=7 kept=7 batches=11 dropped=0
+  repaired=0 quoted=7 ambiguous=0`.
+- all **7/7 questions carried a quote found in the source**; answer indexes
+  after the shuffle `1,3,1,0,2,2,2` (before: `0,0,0,0,0,0,0`).
+- driven through the real UI: correct picks → **7/7 100%**, each result showing
+  `Source: "…"`; one deliberately wrong pick → **6/7 86%** with `✗`, the
+  struck-out wrong option and the right one beside it. **0 console errors.**
+- cost: **~15 requests / ~165 s** before the ceiling below, **~9 / ~80 s** after;
+  model latency varies 2–21 s per call. Background job, never blocking.
+
+**`quizCount()` now caps by source material** — `min(asked, max(4, chars/350))`.
+It asked for `5 + msgs/5 + summaryPoints` = **17 questions from a 2 714-char
+session** (~160 chars of source per key), so the generator could only re-cover
+facts it had already used and burned 11 batches to fill 7 slots. Every key has
+to point at a sentence really in the text, so the count is capped at what
+~350 chars can honestly support.
+
+**Cache invalidation:** quiz entries now carry `v: QUIZ_VERSION` (2). The
+fingerprint only moves when the *conversation* changes, so without a version
+bump every pre-existing test would keep its inaccurate keys forever. Old
+entries regenerate once on open, then cache normally. Summaries are **not**
+version-bumped — they are accurate under the new clip only from a ↻, so they
+regenerate when the conversation changes rather than silently burning quota.
 

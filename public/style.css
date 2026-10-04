@@ -128,6 +128,76 @@ body {
 
 #main-row { flex: 1; display: flex; min-height: 0; }
 
+/* ---------------- Boot overlay ----------------
+ * #boot is the whole screen until init() has really finished (it lives in
+ * <html data-boot>, see index.html). Without it the LIST layout paints first
+ * and the remembered GRAPH view takes over half a second later — a flicker on
+ * every reload. Three states:
+ *     [data-boot]        opaque splash; #app / #ws-page are visibility:hidden
+ *                        (still laid out, so revealing them costs no reflow)
+ *     [data-boot='out']  app revealed underneath, splash fading out
+ *     no attribute       display:none — the app owns the screen again
+ */
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  background-color: var(--bg);
+  background-image: var(--texture);
+  opacity: 1;
+  transition: opacity 0.22s ease;
+}
+#boot .boot-in {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+#boot .boot-mark { width: 44px; height: 44px; font-size: 44px; color: var(--accent); }
+#boot .boot-name {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+#boot .boot-hint { font-size: 12.5px; color: var(--text-dim); }
+#boot .boot-bar {
+  display: block;
+  width: 168px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+#boot .boot-bar i {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  animation: boot-slide 1.05s ease-in-out infinite;
+}
+@keyframes boot-slide {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(370%); }
+}
+
+html:not([data-boot]) #boot { display: none; }
+html[data-boot] #app,
+html[data-boot] #ws-page { visibility: hidden; }
+/* Later in the file and equally specific, so it wins over the two above. */
+html[data-boot='out'] #app,
+html[data-boot='out'] #ws-page { visibility: visible; }
+html[data-boot='out'] #boot { opacity: 0; pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  #boot { transition: none; }
+  #boot .boot-bar i { animation-duration: 2.6s; }
+}
+
 /* ---------------- Icon system ----------------
  * Every control draws from the #ico-sprite in index.html: 24x24 line icons,
  * one weight, no fills. They render at 1em so each icon tracks the font-size
@@ -1773,6 +1843,16 @@ mark.explain-src:hover { background: var(--yellow-hover); }
 .res-line { color: var(--text-dim); margin-top: 3px; }
 .res-line b { color: var(--accent2); font-weight: 600; }
 .res-why { color: var(--text-dim); font-style: italic; font-size: 11.5px; margin-top: 3px; }
+/* The sentence the audit pass quoted when it confirmed this key — so a
+   disputed mark can be settled on the spot, not by cross-checking a second
+   website (PLAN §9.2). */
+.res-src {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  margin-top: 4px;
+  padding-left: 7px;
+  border-left: 2px solid var(--border-hi);
+}
 
 /* ---------------- Settings overlay ---------------- */
 

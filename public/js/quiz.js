@@ -2,28 +2,66 @@
 import { escapeHtml, renderInline } from './markdown.js';
 import { persistNotes } from './selection.js';
 import { $, state, summaryBody, testBadges, testSection } from './state.js';
-import { bgRequest, enqueueBg, fingerprintOf, hasRepetition, quizCache, quizState, renderSummary, renderTestBadges, renderTestSection, sanitizePoints, summaryCache, summaryPromptInput, summaryState, testsCache } from './summary.js';
+import {
+  applyVerdicts,
+  keyQuiz,
+  parseVerdicts,
+  shuffleQuestion,
+} from './grounding.js';
+import { bgRequest, buildSummaryChunks, enqueueBg, fingerprintOf, hasRepetition, quizCache, quizState, renderSummary, renderTestBadges, renderTestSection, summaryCache, summaryState, testsCache } from './summary.js';
 import { html, render } from './views.js';
 
 /* ================= Quiz (background job) ================= */
 /*
- * A multiple-choice test generated from the same session content as the
+ * A multiple-choice test generated from the SAME session content as the
  * summary: 5-20 questions (longer conversation -> longer test), each with
  * exactly 4 options and one correct answer. Cached per conversation,
  * refreshed on open / on leaving / via ↻, persisted with PUT {quiz}.
+ *
+ * Two rules make the keys trustworthy (PLAN §9, Phases 1+2):
+ *   1. Grounded — questions are written per CHUNK of buildSummaryChunks(),
+ *      the same units the summary reads, so the two cannot disagree about
+ *      what happened in the session.
+ *   2. Audited — the model names the correct option as PROSE, code turns that
+ *      into an index, and a second pass re-reads the source and says which
+ *      option it actually supports. Disagree with no quote → the question is
+ *      dropped rather than graded against a guess.
  */
 
 export const QUIZ_SYS = [
   'You write multiple-choice quiz questions for a learning session.',
   'Output ONLY a JSON array — no markdown fences, no commentary, no extra text.',
-  'Each element: {"q":"question","options":["choice one","choice two","choice three","choice four"],"answer":0,"why":"one short sentence explaining the correct answer"}',
+  'Each element: {"q":"question","options":["choice one","choice two","choice three","choice four"],"correct":"<verbatim copy of the one correct option>","why":"one short sentence explaining the correct answer"}',
   'Rules:',
-  '- exactly 4 options per question; exactly one correct answer ("answer" is its 0-based index).',
+  '- exactly 4 options per question; exactly one correct answer.',
+  '- "correct" MUST be copied WORD FOR WORD from one of the entries in "options" — same words, same order, same punctuation. Never a letter, never an index, never a paraphrase.',
   '- Every option must be a real, plausible full answer phrase — NEVER the letters A/B/C/D or placeholder text.',
   '- Test understanding (definitions, cause and effect, examples, application), not trivia or wording memory.',
-  '- Every question must be answerable ONLY from the session content provided.',
-  '- Vary difficulty; cover different parts of the session; never test the same fact twice.',
+  '- Every question must be answerable ONLY from the SOURCE provided, and the correct option must be supported by a sentence in it.',
+  '- Vary difficulty; cover different parts of the source; never test the same fact twice.',
   '- Plain short English sentences.',
+].join('\n');
+
+/* Bump when the pipeline in runQuiz() changes so tests written by an older,
+ * less accurate pipeline regenerate instead of staying wrong forever — the
+ * fingerprint only moves when the CONVERSATION changes, not when we improve
+ * how we read it. Costs one regeneration per conversation, once. */
+export const QUIZ_VERSION = 2;
+
+/* The audit pass: a second, independent read of the same text, asked which
+ * option that text actually supports. Temperature 0 — this is a measurement,
+ * not a creative step. */
+export const QUIZ_VERIFY_SYS = [
+  'You audit multiple-choice answer keys against the source text they were written from.',
+  'For EVERY question, decide which single option the source text supports.',
+  'Output ONLY a JSON array with one element per question, in the same order:',
+  '{"i":0,"supported":<0-based index of the supported option>,"quote":"<short sentence copied word-for-word from the source that supports it>","ambiguous":<true if more than one option could be true>}',
+  'Rules:',
+  '- "supported" is -1 when the source supports NONE of the options.',
+  '- "ambiguous" is true whenever two or more options are defensible from the source.',
+  '- "quote" is copied verbatim from the source; use "" if no sentence supports any option.',
+  '- Judge only by the source text, never by your own knowledge.',
+  '- No commentary, no markdown, no extra keys.',
 ].join('\n');
 
 /* Rotating focus per batch — forces variety: small models at low temperature
@@ -41,10 +79,29 @@ export const QUIZ_FOCUS = [
  * +1 per summary point, clamped to 4..20. */
 export function quizCount(convId, messages, explains) {
   const nodes = (explains && explains.nodes) || {};
+  const add = (arr) => {
+    for (const m of arr || []) chars += String(m.content == null ? '' : m.content).length;
+  };
   let msgs = messages.length;
-  for (const nd of Object.values(nodes)) msgs += (nd.messages || []).length;
+  let chars = 0;
+  add(messages);
+  for (const nd of Object.values(nodes)) {
+    msgs += (nd.messages || []).length;
+    add(nd.messages);
+  }
   const pts = ((summaryCache[convId] || {}).points || []).length;
-  return Math.max(4, Math.min(20, 5 + Math.floor(msgs / 5) + pts));
+  const asked = 5 + Math.floor(msgs / 5) + pts;
+
+  /*
+   * Asking for one question per ~350 characters is roughly what a session can
+   * actually support: every key has to point at a sentence that is really in
+   * the text (PLAN §9.2 audits it, it cannot invent material). Above that the
+   * generator just re-covers facts it has already used — and the old code
+   * accepted those repeats as fresh questions, which is a large part of why
+   * the tests read as inaccurate. Same target, honest ceiling.
+   */
+  const supportable = Math.max(4, Math.floor(chars / 350));
+  return Math.max(4, Math.min(20, Math.min(asked, supportable)));
 }
 
 export function parseQuiz(text) {
@@ -134,13 +191,20 @@ export function parseQuiz(text) {
     const opts = Array.isArray(raw.options)
       ? raw.options.filter((o) => typeof o === 'string' && o.trim())
       : [];
-    const ans = Number(raw.answer);
     if (opts.length < 2 || opts.length > 6) continue;
-    if (!Number.isInteger(ans) || ans < 0 || ans >= opts.length) continue;
+    /* The key arrives as PROSE ("correct"), not as an index — see QUIZ_SYS.
+     * An index is still tolerated as a fallback for models that ignore the
+     * instruction, but keyQuiz() marks it unverified, so the audit pass has to
+     * confirm it before it can grade anybody. */
+    const correct = typeof raw.correct === 'string' ? raw.correct.trim() : '';
+    const ans = Number(raw.answer);
+    const hasIdx = Number.isInteger(ans) && ans >= 0 && ans < opts.length;
+    if (!correct && !hasIdx) continue;
     out.push({
       q: raw.q.trim(),
       options: opts.map((o) => o.trim()),
-      answer: ans,
+      correct,
+      answer: hasIdx ? ans : -1,
       why: typeof raw.why === 'string' ? raw.why.trim() : '',
     });
   }
@@ -160,7 +224,10 @@ export function sanitizeQuiz(questions) {
       if (typeof o !== 'string' || !o.trim() || o.length > 160) return false;
       if (hasRepetition(o, 1)) return false;
     }
-    return Number.isInteger(q.answer) && q.answer >= 0 && q.answer < q.options.length;
+    const keyed =
+      (typeof q.correct === 'string' && q.correct.trim()) ||
+      (Number.isInteger(q.answer) && q.answer >= 0 && q.answer < q.options.length);
+    return !!keyed;
   });
 }
 
@@ -168,7 +235,15 @@ export function runQuiz(convId, messages, explains, force = false) {
   if (!convId) return;
   const fp = fingerprintOf(messages, explains);
   const cached = quizCache[convId];
-  if (!force && cached && cached.fingerprint === fp && (cached.questions || []).length) return;
+  if (
+    !force &&
+    cached &&
+    cached.v === QUIZ_VERSION &&
+    cached.fingerprint === fp &&
+    (cached.questions || []).length
+  ) {
+    return;
+  }
   if (
     messages.length === 0 &&
     Object.keys((explains && explains.nodes) || {}).length === 0
@@ -186,30 +261,87 @@ export function runQuiz(convId, messages, explains, force = false) {
   const isCurrent = () => convId === state.currentId;
   if (isCurrent()) renderTestSection(); // shows the "preparing" state
 
-  const SAMPLING = {
-    // Higher temp is safe here: format:json grammar-locks the structure, and
-    // low temps make small models mode-collapse onto the same question.
-    temperature: 0.8,
-    // no frequency/repeat penalty: with grammar-locked JSON it pushes
-    // small models into rambling inside string values until the token cap.
-    maxTokens: 900, // capped batch output
-    jsonMode: true, // grammar-locked JSON on Ollama — no broken arrays
-  };
+  /*
+   * Two sampling profiles. Variety now comes from the QUIZ_FOCUS rotation and
+   * from writing each batch against a different chunk of the session, so the
+   * temperature no longer has to supply it — at 0.8 it was also free to hand
+   * back a wrong or mismatched key (root cause 4 in PLAN §9.1). Verification
+   * is a measurement, not a creative step: temperature 0.
+   * No frequency/repeat penalty with grammar-locked JSON: it pushes small
+   * models into rambling inside string values until the token cap.
+   */
+  const GEN_SAMPLING = { temperature: 0.4, maxTokens: 900, jsonMode: true };
+  const VERIFY_SAMPLING = { temperature: 0, maxTokens: 700, jsonMode: true };
   const BATCH = 3; // questions per request — short outputs parse reliably
+
+  /* One audit request per generated batch: the batch's own source is right
+   * there, so no key is ever checked against text it did not come from.
+   * Returns null when the audit could not run — applyVerdicts() then keeps
+   * only the keys that were resolved from the model's own prose. */
+  const auditBatch = async (questions, source) => {
+    if (!questions.length) return null;
+    let txt;
+    try {
+      txt = await bgRequest(
+        [
+          { role: 'system', content: QUIZ_VERIFY_SYS },
+          {
+            role: 'user',
+            content:
+              `SOURCE:\n${source}\n\nQUESTIONS:\n` +
+              JSON.stringify(
+                questions.map((q, i) => ({
+                  i,
+                  q: q.q,
+                  options: q.options,
+                  claimed: q.answer,
+                }))
+              ),
+          },
+        ],
+        signal,
+        VERIFY_SAMPLING
+      );
+    } catch {
+      return null;
+    }
+    if (/^\s*⚠️/.test(String(txt))) return null;
+    return parseVerdicts(txt, questions.length);
+  };
 
   // Serialize behind the summary job — one generation at a time.
   enqueueBg(async () => {
     try {
       const n = quizCount(convId, messages, explains);
-      const content = summaryPromptInput(messages, explains);
+      /* Phase 1: the SAME chunks the summary reads, instead of
+       * summaryPromptInput()'s last-30-messages digest clipped to 400 chars —
+       * anything older, or past 400 characters into a real answer, simply was
+       * not in front of the model, so it invented a key. */
+      const chunks = buildSummaryChunks(messages, explains);
+      if (!chunks.length) throw new Error('empty session');
+
       const all = [];
       const seenQ = new Set();
+      const audit = { dropped: 0, repaired: 0, quoted: 0, ambiguous: 0 };
       let batch = 0;
       let emptyStreak = 0;
+      let ci = 0;
+      let round = 0;
+      // Bounds, not hopes: 12 batches covers a 20-question test with room for
+      // duplicates, and 4 passes over the same chunk is plenty of variety for
+      // a session too short to have produced more chunks.
 
-      // Generate in small batches until we have enough questions.
-      while (all.length < n && batch < 14 && emptyStreak < 4) {
+      // Round-robin the chunks until we have enough questions: every part of
+      // the session gets covered, and a second round goes back for facts the
+      // first round did not use.
+      while (all.length < n && batch < 12 && emptyStreak < 4) {
         if (signal.aborted) return;
+        if (ci >= chunks.length) {
+          ci = 0;
+          round++;
+          if (round >= 4) break;
+        }
+        const src = chunks[ci++];
         const want = Math.min(BATCH, n - all.length);
         batch++;
         const covered = all.map((q) => q.q.slice(0, 90));
@@ -220,8 +352,8 @@ export function runQuiz(convId, messages, explains, force = false) {
             {
               role: 'user',
               content:
-                `${content}\n\nCreate exactly ${want} multiple-choice questions` +
-                (batch > 1 ? ` (batch ${batch})` : ' for this learning session.') +
+                `SOURCE (one part of this learning session):\n${src}\n\n` +
+                `Create exactly ${want} multiple-choice questions drawn ONLY from this source` +
                 (covered.length
                   ? `.\nDo NOT repeat or rephrase questions already created:\n- ${covered.join('\n- ')}`
                   : '') +
@@ -231,28 +363,56 @@ export function runQuiz(convId, messages, explains, force = false) {
             },
           ],
           signal,
-          SAMPLING
+          GEN_SAMPLING
         );
         if (/^\s*⚠️/.test(String(txt))) {
           emptyStreak++;
           continue;
         }
-        const qs = sanitizeQuiz(parseQuiz(txt));
-        let added = 0;
-        for (const q of qs) {
-          if (all.length >= n) break;
+
+        /* Phase 2: key from the prose, then have the source audited — but only
+         * what we would actually keep. Auditing a question that is already in
+         * the test spends a request on an answer we would throw away anyway. */
+        const keyed = keyQuiz(sanitizeQuiz(parseQuiz(txt))).map(shuffleQuestion);
+        const fresh = [];
+        for (const q of keyed) {
+          if (all.length + fresh.length >= n) break;
           const key = q.q.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').slice(0, 80);
-          if (!key || seenQ.has(key)) continue; // duplicate question across batches
+          if (!key || seenQ.has(key)) continue; // duplicate of an earlier batch
           seenQ.add(key);
+          fresh.push(q);
+        }
+        if (!fresh.length) {
+          emptyStreak++; // model has run out of new facts (or of JSON)
+          continue;
+        }
+        const verdicts = await auditBatch(fresh, src);
+        const res = applyVerdicts(fresh, verdicts, src);
+        audit.dropped += res.stats.dropped;
+        audit.repaired += res.stats.repaired;
+        audit.quoted += res.stats.quoted;
+        audit.ambiguous += res.stats.ambiguous;
+
+        let added = 0;
+        for (const q of res.kept) {
+          if (all.length >= n) break;
           all.push(q);
           added++;
         }
         emptyStreak = added ? 0 : emptyStreak + 1;
       }
 
+      // Kept / dropped / repaired, for the guardrail in PLAN §9.2. Pre-built as
+      // a string: console format specifiers survive as text through CDP.
+      console.debug(
+        `[quiz] target=${n} kept=${all.length} batches=${batch} ` +
+          `dropped=${audit.dropped} repaired=${audit.repaired} ` +
+          `quoted=${audit.quoted} ambiguous=${audit.ambiguous}`
+      );
+
       const status = summaryState.inflight === convId ? 'summarizing…' : '';
       if (all.length) {
-        const entry = { fingerprint: fp, questions: all, at: Date.now() };
+        const entry = { fingerprint: fp, questions: all, at: Date.now(), v: QUIZ_VERSION };
         quizCache[convId] = entry;
         fetch(`/api/conversations/${convId}`, {
           method: 'PUT',
@@ -381,6 +541,7 @@ export function finishTest() {
     options: q.options,
     answer: q.answer,
     why: q.why || '',
+    snippet: q.snippet || '', // the source sentence the audit pass quoted
     picked: state.quizView.answers[idx],
   }));
   const score = items.filter((it) => it.picked === it.answer).length;
@@ -459,6 +620,9 @@ export function renderResults() {
                   class="res-why"
                   dangerouslySetInnerHTML=${{ __html: renderInline(escapeHtml(String(it.why))) }}
                 />`
+              : null}
+            ${it.snippet
+              ? html`<div class="res-src">Source: “${String(it.snippet)}”</div>`
               : null}
           </li>`;
         })}

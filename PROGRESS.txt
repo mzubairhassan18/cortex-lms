@@ -340,6 +340,92 @@ See PLAN.md 2.5 for the full write-up.
             list AND graph (menu 186x109, no ancestor clips it), dark<->light
             round trip repaints from tokens, 0 console errors.
             New sprite symbol: i-download (30 -> 31).
+[x] P1.31 2026-10-04 Boot = ONE loader, never the list view
+            The complaint: on reload the conversation list painted for a beat
+            before the graph came up. Now the ONLY thing on screen until init()
+            finishes is the #boot overlay.
+            <html lang="en" data-boot> is set IN THE MARKUP, so the very first
+            paint is already the loader (a JS-added attribute would paint the
+            app first). #app and #ws-page are visibility:hidden - still LAYED
+            OUT, so the reveal is a repaint, not a reflow.
+            endBoot() lives in init()'s FINALLY: data-boot='out' (reveals #app,
+            fades #boot over .22s) then the attribute goes after 260ms. An
+            8s watchdog setTimeout sits in <head> so a thrown error can never
+            strand the user on the loader.
+            input.focus() had to move AFTER the finally block - a
+            visibility:hidden input cannot take focus.
+            /workspaces now await initWorkspacePage() (which return load()s) so
+            the cards exist before the reveal.
+            Verified in-browser on a fresh tab: t~492-550ms only #boot visible
+            (bootDisp=grid, #app visibility:hidden, body already graph-mode and
+            the graph already entered BEHIND the overlay); t~603 data-boot='out'
+            + opacity transition; t~861 attribute removed. NO list view ever
+            painted. /workspaces boots with 3 cards; landing / unaffected (no
+            #boot, no data-boot). 0 console errors on all three routes.
+[x] P1.32 2026-10-04 Summary & quiz accuracy - Phases 1+2+3 IMPLEMENTED
+            Full diagnosis, implementation table and live numbers in
+            PLAN.md section 9.3 (Q9 closed).
+            New public/js/grounding.js - ZERO IMPORTS, the export-format.js
+            pattern - holds clipHeadTail / normKey / resolveAnswer /
+            quoteInSource / keyQuiz / shuffleQuestion / parseVerdicts /
+            applyVerdicts, so it runs under node as a guardrail.
+            quiz.js: generated PER buildSummaryChunks() chunk (round-robin,
+            round>=4, batch<12, emptyStreak<4) instead of summaryPromptInput()'s
+            last-30-message 400-char digest - that function is DELETED. The key
+            arrives as PROSE "correct", is resolved to an index or the question
+            is DROPPED, then every batch is AUDITED at temperature 0 by
+            QUIZ_VERIFY_SYS: disagree + no usable quote -> drop, disagree + a
+            quote found in the source -> repair, ambiguous -> drop, silent ->
+            keep prose-keyed only / drop index-only. Dedupe runs BEFORE the
+            audit so a duplicate never costs a request.
+            summary.js: head+tail clip (the conclusion of a long derivation
+            used to be cut off), sanitizePoints 12 -> 8 chars + hasRepetition(x,3).
+            GEN_SAMPLING temperature 0.8 -> 0.4. Quiz cache carries
+            v:QUIZ_VERSION(2) so pre-existing wrong tests regenerate once.
+            quizCount() caps by material: min(asked, max(4, chars/350)) - it was
+            asking for 17 questions from a 2714-char session.
+            FOUND WHILE VERIFYING (not in the original diagnosis): POSITION
+            BIAS. The first live run came back answer=0 on 7 of 7 questions -
+            a model writing "correct" as a verbatim copy emits that option
+            first, so the test was guessable and looked broken even where every
+            key was right. shuffleQuestion() randomises the options, carrying
+            the key, BEFORE the audit.
+            Guardrail: npm run check:grounding -> scripts/grounding-check.mjs,
+            34 checks, no network. Feeds the pure layer wrong keys, ambiguous
+            options, missing quotes, malformed verdicts, un-shuffled slots, then
+            asserts the user who picked what the SOURCE supports grades correct.
+            Result: 34 passed, 0 failed.
+            LIVE END-TO-END (free routed kilo-auto/free, no key) on a throwaway
+            12-message conversation in Physics lab, deleted afterwards:
+              summary 10 points; [quiz] target=7 kept=7 batches=11 dropped=0
+              repaired=0 quoted=7 ambiguous=0. All 7 questions carried a quote
+              found in the source; answer indexes 1,3,1,0,2,2,2 (was 0,0,0,0,0,0,0).
+              Real UI, correct picks -> 7/7 100% with Source: "..." on every
+              result; one deliberately wrong pick -> 6/7 86% with the wrong
+              option struck out and the right one beside it. 0 console errors.
+              Cost after the ceiling: ~9 requests / ~80s (was ~15 / ~165s).
+            Cache note: QUIZ is version-bumped (one regeneration each, once);
+            SUMMARIES are not - they would otherwise burn quota on every open,
+            so they regenerate when the conversation changes or via the header
+            refresh button.
+[x] P1.33 2026-10-04 Graph pan throttled (and profiled)
+            "The graph view hangs - take a look at it." PROFILED FIRST: trace
+            start/stop/analyze = 0 long tasks, RunTask 126/29.8ms, CPU profile
+            (idle) 29970ms of 30037ms, top real fn setZoom 9.5ms. DOM tiny: 871
+            nodes total, 13 .gnode, canvas 1776x1684.8, 4 edges, heap 4MB.
+            Checked overlayObserver, setVisible, layout/extent memo,
+            wrapFirstOccurrence and streamChat's while(true) - all bounded and
+            streamChat always calls streamer.end(). NOT REPRODUCIBLE here; the
+            only plausible read is a native confirm()/alert() (conversations,
+            library, files, workspaces) looking frozen.
+            IMPROVED ANYWAY: pointermove no longer writes scroll synchronously.
+            applyPan() batches into one rAF frame PLUS a 16ms timer (rAF alone
+            would have been a REGRESSION - the test browser is document.hidden
+            and rAF never fires); endPan() lands the final position inline and
+            clears .panning.
+            Verified: a 60-event pointermove burst did not write scroll
+            (throttled:true), after 80ms scroll = before-(60,40) (applied:true),
+            pointerup landed the final offset (landedOnUp:true).
 
 P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
 ------------------------------------------------------
@@ -392,13 +478,14 @@ OPEN QUESTIONS (see PLAN.md section 7)
         link" — meaning unclear, needs clarification
 [x] Q8  2026-10-03 Graph view coexists with list view behind the header toggle
         (the brief literally says "list view <-> graph view").
-[!] Q9  2026-10-04 Summary/quiz accuracy rework — where to start? Plan is in
-        PLAN.md section 9 (diagnosis: quiz built from a last-30-message digest
-        instead of the transcript, tutor clipped to 500 chars, grading is bare
-        index equality with no verification pass, temperature 0.8, per-request
-        Auto model, sanitizePoints drops short facts). Recommended: Phases 1+2
-        together (ground it on the same chunks the summary reads, then verify
-        every answer key and drop unverifiable questions). AWAITING GO-AHEAD.
+[x] Q9  2026-10-04 Summary/quiz accuracy rework -> RESOLVED, Phases 1+2+3
+        implemented and live-verified. See PLAN.md section 9.3 and PROGRESS
+        P1.32 (diagnosis: quiz built from a last-30-message digest instead of
+        the transcript, tutor clipped to 500 chars, grading is bare index
+        equality with no verification pass, temperature 0.8, per-request Auto
+        model, sanitizePoints drops short facts). One extra root cause found
+        while verifying: POSITION BIAS - 7/7 keys landed in slot 0.
+        Only Phase 4 (pin one model / BYOK) remains, blocked on P2.
 
 DONE SO FAR (v1 — all shipped)
 ------------------------------
