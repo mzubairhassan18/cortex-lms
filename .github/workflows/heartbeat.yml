@@ -1,0 +1,55 @@
+# Keeps the Supabase free project awake.
+#
+# Supabase Free pauses a project after ~1 week of inactivity, which sleeps the
+# database, Auth and Storage together — so this cron is not optional
+# (PLAN.md section 4). Every 4 days stays comfortably inside that window even
+# if a run is skipped.
+#
+# WHAT IT PINGS, AND WHY NOT SOMETHING ELSE
+# -----------------------------------------
+# /auth/v1/health only: ~107 bytes, no user identity, no session.
+#
+# It must NOT invoke our Edge Function and must NOT authenticate as a user,
+# because our own metering is per-user per-day (Free = 50 requests/day in
+# usage_daily). A heartbeat that counted would spend real quota and write a
+# phantom row into the usage rollup, and the admin dashboard would show a user
+# who never existed. The meter only increments for authenticated,
+# user-attributed requests — nothing else in this repo may bypass that.
+#
+# On Supabase's side the cost is ~175 requests a year at ~300 bytes each
+# (~50 KB/yr) against a 5 GB egress allowance. There is no per-request daily
+# cap to burn through; the things that are capped are egress, Edge invocations
+# and MAU, none of which this touches.
+#
+# NOTE: GitHub disables scheduled workflows after 60 days without repo
+# activity. Any long quiet stretch needs one manual workflow_dispatch run.
+#
+# NOTE 2: once the Edge Function exists (P2.11), upgrade this to invoke its
+# health route with a shared secret. That provably reaches Postgres, whereas
+# whether GoTrue's liveness endpoint counts as "activity" is Supabase's
+# implementation detail and not documented.
+name: Supabase heartbeat
+
+on:
+  schedule:
+    - cron: '17 4 */4 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake the project
+        run: |
+          BASE='https://agyxcfnfvggpbhzyhrsj.supabase.co'
+          # Publishable key — already public in public/js/auth.js, so it is not
+          # a new exposure and needs no repository secret.
+          KEY='sb_publishable_woXb6y4EzUGKIcrn_rgm1Q_sf53LpBy'
+          code=$(curl -sS -o body -w '%{http_code}' \
+                   -H "apikey: $KEY" "$BASE/auth/v1/health")
+          echo "auth health -> HTTP $code"
+          cat body; echo
+          [ "$code" = "200" ] || exit 1

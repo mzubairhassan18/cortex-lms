@@ -1,0 +1,54 @@
+# Publishes the assembled site to GitHub Pages.
+#
+# This is the entire "build" for a project that has no build step:
+# assemble.mjs copies public/ and stamps the deploy base. It deliberately does
+# NOT run `npm install` — every runtime dependency (preact, htm, marked,
+# supabase-js, @use-gesture) is vendored into public/vendor/, and that is
+# exactly what makes a folder of static files a complete site.
+#
+# GitHub Actions handles this half of the architecture because it is a batch
+# job with a well-defined end. The streaming LLM proxy is the other half and
+# Actions cannot do it — it runs jobs, it does not serve requests — so that
+# lives in a Supabase Edge Function (PLAN.md section 4, blocker 1).
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Two deploys must never interleave, but a deploy already in flight should be
+# allowed to finish rather than being cancelled halfway to Pages.
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Assemble out/
+        run: node scripts/assemble.mjs
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
