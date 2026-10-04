@@ -71,6 +71,42 @@ export async function requireSession(next) {
   return false;
 }
 
+/**
+ * Is an OAuth provider switched on for this project?
+ *
+ * Returns true/false, or null when the check itself failed so callers can
+ * tell "it is off" apart from "I don't know".
+ *
+ * This exists because signInWithOAuth NAVIGATES the browser to the authorize
+ * endpoint. If the provider is disabled, that endpoint answers 400 and the raw
+ * JSON becomes the page — there is no error object to catch, and no way back.
+ * Asking first turns a dead end into a sentence the user can act on.
+ * /auth/v1/settings is public: it is the same thing the OAuth button would
+ * have asked for a moment later.
+ */
+export async function providerEnabled(name, timeoutMs = 4000) {
+  try {
+    const ctrl = new AbortController();
+    // Bounded on purpose: the caller keeps the button disabled until this
+    // resolves, so an unbounded hang would leave Google permanently unusable.
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/settings`, {
+        headers: { apikey: SUPABASE_KEY },
+        signal: ctrl.signal,
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const on = data.external && data.external[name];
+      return typeof on === 'boolean' ? on : null;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return null;
+  }
+}
+
 /** For the sign-out control. */
 export async function signOut() {
   if (!client) return;

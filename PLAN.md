@@ -733,7 +733,11 @@ scheme (verified: light-visit → `/app` → still light).
 11. [ ] Workspaces (cards → app) — *local half done in §2.5; auth + user scoping remain*
 12. [ ] User/workspace scoping on every route
 13. [ ] BYOK (per-user provider + key, stored server-side)
-14. [ ] Pricing page + bank-transfer payment claims (no Stripe)
+14. [~] Pricing page + bank-transfer payment claims (no Stripe)
+    — `/pricing` shipped *(P2.9, 2026-10-05)*: three tiers matching
+    `platform_settings.plans`, deliberately **static** because `anon` has every
+    table privilege revoked and GitHub Pages has no server to read the row.
+    Remaining: the claim-filing form and the admin approval side *(P2.9b)*.
 15. [ ] Admin dashboard (users, requests, Supabase-limit gauges, claim queue)
 16. [ ] Port `server.js`'s streaming proxy → Supabase Edge Function
 17. [ ] Migrate existing local data *(pending Q6)*

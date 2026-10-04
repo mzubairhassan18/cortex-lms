@@ -4,7 +4,7 @@
  * One document serves both routes: server.js maps /login and /signup to
  * auth.html and the mode comes from location.pathname, so the two never drift.
  */
-import { client, safeNext } from './auth.js';
+import { client, safeNext, providerEnabled } from './auth.js';
 
 const path = location.pathname.replace(/\/+$/, '');
 const isSignup = path === '/signup';
@@ -57,6 +57,30 @@ if (isSignup) {
   switchEl.innerHTML = 'New here? <a href="/signup">Create an account</a>';
 }
 
+/* ---------- is Google actually switched on? ---------- */
+/*
+ * Checked before the button can be pressed. A disabled provider does not fail
+ * in JavaScript — signInWithOAuth navigates away and the authorize endpoint
+ * renders its 400 as the page, so by the time anything is knowable it is too
+ * late to say anything useful.
+ */
+const googleOn = await providerEnabled('google');
+
+if (googleOn === false) {
+  googleBtn.disabled = true;
+  googleLabel.textContent = 'Google sign-in is not set up yet';
+  say(
+    "Google sign-in hasn't been switched on for this site yet, so pressing " +
+      'it would only show you an error page. The email link below works ' +
+      'today — it signs you in with no password.',
+    'error',
+  );
+} else {
+  // true, or null when the check itself failed — in which case best effort is
+  // to let them try rather than to block a provider that may well be fine.
+  googleBtn.disabled = false;
+}
+
 /* ---------- already signed in? go straight through ---------- */
 async function currentSession() {
   try {
@@ -65,6 +89,19 @@ async function currentSession() {
   } catch {
     return null;
   }
+}
+
+/* Someone arriving from the pricing page picked a paid tier. They cannot be
+   put on it directly — profiles.plan is guarded so only an administrator can
+   change it, and the transfer has to be matched first. Say so now rather than
+   letting them assume the click did something. */
+const wantedPlan = new URLSearchParams(location.search).get('plan');
+if (isSignup && (wantedPlan === 'pro' || wantedPlan === 'team')) {
+  const label = wantedPlan === 'pro' ? 'Pro' : 'Team';
+  $('auth-fineprint').textContent =
+    `You'll create a free account first, then add ${label} on the next step. ` +
+    'Your plan switches on once the bank transfer is matched — nothing is ' +
+    'charged automatically.';
 }
 
 if (await currentSession()) location.replace(next);
@@ -77,6 +114,7 @@ client.auth.onAuthStateChange((_event, session) => {
 
 /* ---------- Google ---------- */
 googleBtn.addEventListener('click', () => {
+  if (googleOn === false) return;   // disabled button; never navigate to a 400
   if (!client) return say('The sign-in library failed to load — reload the page.', 'error');
   googleBtn.disabled = true;
   googleLabel.textContent = 'Opening Google…';

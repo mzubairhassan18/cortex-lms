@@ -581,11 +581,42 @@ P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
             3. Authentication -> URL Configuration -> set Site URL to the
                deployed origin (and allow http://localhost:3000 while testing)
             4. then flip GATE 'auto' -> 'on' in public/js/auth.js
-[ ] P2.9  Pricing page + bank-transfer payment claims. NO Stripe: user files a
-          payment_claims row, an admin approves it and profiles.plan flips.
-          bank_details / payment_notice / plans already seeded in
-          platform_settings; the bank account fields are filled in later from
-          the admin side (user's request).
+[ ] P2.8b Provider pre-flight on the auth page (2026-10-05)
+          The Google button no longer dead-ends. signInWithOAuth NAVIGATES
+          the browser to /auth/v1/authorize, so a disabled provider answers
+          400 and the raw JSON becomes the page - there is no error object
+          to catch and fail() never runs. providerEnabled() now reads the
+          public /auth/v1/settings first (google:false, email:true confirmed
+          live), and the button starts disabled in markup: enabled only if
+          the answer is true, kept disabled with a sentence if false, best
+          effort if the check fails (4s AbortController bound so a hang
+          cannot leave Google permanently unusable).
+          EMAIL IS THE WORKING PATH TODAY: /auth/v1/settings reports
+          email:true, disable_signup:false, mailer_autoconfirm:false.
+[x] P2.9  2026-10-05 Pricing page (/pricing, public/pricing.html)
+          Three tiers exactly as agreed and exactly as seeded into
+          platform_settings.plans: Free $0 forever (50 req/day, 10
+          conversations, 1 workspace, 50 MB) / Pro $9 mo (500 req/day,
+          unlimited conversations, 10 workspaces, 1 GB) / Team $29 mo
+          (2,000 req/day pooled, unlimited conversations, unlimited
+          workspaces, 10 GB, 10 seats). Verified in the browser: names,
+          prices, 6 limit rows each, CTAs -> /signup?plan=free|pro|team,
+          0 console errors.
+          STATIC BY DESIGN, and this is worth not "fixing" later: anon has
+          every table privilege revoked (P2.1), and on GitHub Pages there is
+          no server.js to read platform_settings.plans anyway. So the page
+          is markup and the DB row is the runtime source of truth the Edge
+          Function enforces against. A tier change must touch BOTH - the
+          comment saying so is at the top of pricing.html.
+          Also carries the bank-transfer explainer (4 steps, no auto-renew)
+          since that is how paid plans are activated (user: no Stripe).
+          /signup?plan=pro now says so on the signup card instead of
+          silently dropping the param - it has to, because profiles.plan is
+          guarded so only an administrator can change it, and the transfer
+          still has to be matched first.
+[ ] P2.9b Bank-transfer claim filing UI ("I have paid" form: amount, tier,
+          transfer reference) writing a payment_claims row, plus the admin
+          side that approves it. Depends on P2.10.
 [ ] P2.10 Admin dashboard — users + MAU, AI requests today/month, per-plan
           usage, Supabase free-tier gauges (warn at 70/85/95%), payment claim
           queue, bank-details editor.

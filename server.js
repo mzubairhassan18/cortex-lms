@@ -190,6 +190,7 @@ app.get('/workspaces/', (req, res) => res.redirect(302, '/workspaces'));
  * to decide which copy to show, so they can never drift apart. */
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'auth.html')));
 app.get('/signup', (req, res) => res.sendFile(path.join(__dirname, 'public', 'auth.html')));
+app.get('/pricing', (req, res) => res.sendFile(path.join(__dirname, 'public', 'pricing.html')));
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(CONV_FILE)) fs.writeFileSync(CONV_FILE, '[]');
