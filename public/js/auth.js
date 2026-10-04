@@ -23,7 +23,7 @@ const SUPABASE_KEY = 'sb_publishable_woXb6y4EzUGKIcrn_rgm1Q_sf53LpBy';
  *   'on'  = gate everywhere — use once Google OAuth + Site URL are set.
  *   'off' = no gate anywhere — the escape hatch if we deploy before auth is
  *          ready, so the site never locks its own users out. */
-export const GATE = 'auto';
+export const GATE = 'on';
 
 export const client =
   typeof window !== 'undefined' && window.supabase
