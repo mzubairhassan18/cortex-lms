@@ -571,6 +571,91 @@ See PLAN.md 2.5 for the full write-up.
            needs a real browser and is the user's to run in Chrome. Worker
            version df564ecb.
 
+[x] P1.36 2026-10-05 Workspace layer at 40% + GRAPH SEARCH that flies to the hit.
+           Seven requests, all on the canvas and the zoomed-out layer.
+           ZOOM_WS 0.5 -> 0.4: the workspace cards take over at 40% zoom.
+           THE HINT REPLACES THE PROSE. Once the board has gone, the real
+           question is not "what is a workspace" but "which gesture brings this
+           back" — and that gesture needs Ctrl, because a plain wheel still
+           pans. So the subtitle is now two kbd chips reading CTRL + MOUSE
+           WHEEL, not a sentence about diving in.
+           THE LAYER GAINED THE PICKER'S TOOLBAR: a search box and the
+           Grid/List toggle, sharing `lb.pickerview` with /workspaces so the two
+           screens can never disagree about layout. Typing re-renders ONLY
+           [data-ws-grid] — rebuilding the input on every keystroke would throw
+           away its caret, which is exactly why workspace-page.js keeps its
+           search field outside the element it re-renders. renderLayer() owns
+           the chrome and ends by calling renderCards(). The reverse edge had to
+           be severed: renderCards() used to fall back to renderLayer() when the
+           grid was missing, and now that renderLayer() calls it, those two
+           would have called each other until the stack ran out.
+           ZOOMING BACK IN DIVES INTO THE LAST WORKSPACE: onZoomChange notices a
+           real crossing out of the layer and snaps to 100% instead of leaving a
+           41%-sized board behind. It fires only when the layer was visible and
+           is now not — the same callback runs at boot with the saved zoom, and
+           snapping THAT would undo the user's zoom on every single load.
+           RAIL OVERFLOW WAS A SPECIFICITY BUG, not a missing width. `#graph-rail
+           button` is (1,0,1) and a bare #id is only (1,0,0), so its width:40px
+           and font-size:17px were beating `#rail-zoom-label`'s width:auto /
+           12px — the "100%" readout AND the new Aligned/Free chip were both
+           being squeezed into a 40px box at 17px. Prefixing both selectors
+           with `#graph-rail` gives (2,0,0) and out-ranks it: no !important, no
+           restructure of the button rule that everything else in the rail
+           depends on.
+           GRAPH SEARCH. #graph-search sits in the toolbar and exists only while
+           body.graph-mode — it answers a question about the canvas, and
+           body.ws-zoomed already hides the entire #top-bar when the workspace
+           layer takes over. GET /api/search returns CONVERSATION IDS ONLY;
+           centerOn() switches to the conversation, finds the explain that holds
+           the phrase in its own already-loaded state, and flies the camera to
+           that box's centre with an easeInOutCubic lerp from wherever the board
+           happens to be — which is the "comes in from whatever direction it
+           was" that was asked for. Only the CAMERA moves, so the node, its
+           explanation tree and every edge travel as one board; nothing is ever
+           re-positioned, so nothing can drift apart on the way.
+           foldOutOfView() IS HELD OFF FOR THE FLIGHT. It closes explains that
+           have drifted off the board, and a search opens one that is BY
+           DEFINITION still somewhere else — without the hold it would be folded
+           again before the camera had moved a pixel. foldHold is released in
+           centerOn's finally, which then runs the fold for real: everything
+           genuinely out of view goes, the thing we flew to does not.
+           A pointer grab (onPointerDown), a wheel zoom (setZoom), leaving graph
+           mode, or a newer keystroke all cancel the flight; searchSeq keeps an
+           out-of-order /api/search reply from winning the race.
+           TWO selectConversation() QUIRKS HAD TO BE DEFUSED: it finishes by
+           focusing the chat input (throwing the caret out of the search box
+           mid-type — centerOn restores focus), and it silently returns while
+           streaming (which would have cheerfully centred the WRONG box —
+           centerOn reports 'busy' instead).
+           THE MATCHING IS SQL, NOT THE BROWSER. jsonb has no substring
+           operator, so PostgREST cannot do it; and matching `col::text` is
+           WRONG even where it looks like it works — `[{"role":"user",...}]`
+           contains "role", "content" and "user" in EVERY row, so those words
+           would return the whole account, as hollow hits the user could never
+           have spotted because only ids come back. jsonpath pulls
+           messages[].content, explains.selection and explains.messages[].content
+           instead; measured after the fix, a pure schema key (parentId) returns
+           0 and "content"/"role" return 2 each, all genuine prose. SECURITY
+           INVOKER, same as consume_quota, so RLS picks the rows and the Worker
+           stays a translator rather than a trust boundary. No index,
+           deliberately: a leading-wildcard LIKE cannot use one, and a stored
+           tsvector would be recomputed on EVERY message write.
+           THE GRANT TOOK TWO ATTEMPTS. Revoking EXECUTE from `anon` alone is a
+           no-op while PUBLIC still grants it, and has_function_privilege said
+           true both before and after; `revoke ... from public, anon` is what
+           actually flips it. Checked in that order: anon false, authenticated
+           true, postgres and service_role true.
+           VERIFIED: 14 conversations total / 13 scoped to muusv5cs24hr4, 0 for
+           'parentId', 0 for an unescaped literal '%' (LIKE wildcards escaped
+           before matching), 0 for a word nobody wrote; /api/search 400s without
+           q and 401s without a session; 8 routes 200; the served graph.js
+           carries flyTo/centerOn/initSearch/explainWith/runSearch and graph.css
+           carries #graph-search, .ws-hint, `#graph-rail #rail-layout` and
+           .ws-grid.is-list. Commits 0d6458d (source) + eaba7c8 (mirror), Worker
+           version 27e773d0. NOT TESTED HERE: the flight itself, the layer's new
+           toolbar and the 40% handover all need a real browser — the user's
+           Chrome.
+
 P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
 ------------------------------------------------------
 [x] P2.1  2026-10-05 Schema + RLS from row one (supabase/migrations/)

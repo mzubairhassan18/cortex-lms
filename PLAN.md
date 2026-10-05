@@ -515,6 +515,27 @@ content on top of the camera. `clip` means there is nothing to scroll at all.
   and the node would lag the cursor. Persisted in `profiles.graph_layout` via
   `GET/PUT /api/layout`. Full reasoning and the security probe behind the write
   path are in PROGRESS P1.35.
+- **Search that flies to the hit, and the 40% handover** *(P1.36, 2026-10-05)*
+  — `#graph-search` sits in the toolbar and exists **only** under
+  `body.graph-mode`, so it leaves with the sidebar in list view and with the
+  whole `#top-bar` once the workspace layer zooms over it. `GET /api/search`
+  returns **conversation ids only**; `centerOn()` switches to the conversation,
+  finds the explain holding the phrase in its own already-loaded state and then
+  flies. The flight lerps the **camera alone**, so the node, its explanation
+  tree and every edge travel as one board — nothing is re-positioned, so
+  nothing can drift apart — and it holds `foldOutOfView()` off for the duration,
+  because that function closes explains that have drifted away and a search
+  opens one that is *by definition* still somewhere else. The zoomed-out layer
+  moves to **40%** and gained the `/workspaces` picker's search + Grid/List
+  toggle (same `lb.pickerview` key, so the two screens cannot disagree), with a
+  **CTRL + MOUSE WHEEL** hint replacing the prose: a plain wheel still pans, so
+  without the hint there is no way to discover how to get back in. Zooming back
+  past the threshold dives into the last workspace at 100% rather than leaving a
+  41%-sized board. The rail's overflowing labels were a **specificity** bug —
+  `#graph-rail button` (1,0,1) out-ranked the bare `#rail-zoom-label` (1,0,0),
+  so `width:40px` and `font-size:17px` won and both labels were squeezed into a
+  40px box; fixed with one more id rather than `!important`. Full detail in
+  PROGRESS P1.36.
 
 **The library: `@use-gesture/vanilla` 10.3.1** (MIT, poimandres/pmndrs — the
 zustand/react-spring team; 4.3 KB + 11 KB core, one transitive dep, ESM only).
@@ -972,6 +993,7 @@ scheme (verified: light-visit → `/app` → still light).
 | 2026-10-05 | **`updated_at` is set by a database trigger, not trusted from the client** — `conversations_ws_time_idx` orders the conversation list by it, so an un-stamped row would strand a chat at the bottom forever. |
 | 2026-10-05 | **Originals go to R2, and Free keeps them.** The user enabled R2 ("you can use r2 i guess for storage, why bloat supabase"), so the backend moved off Supabase Storage; the bucket is reached by the `env.BUCKET` binding, which means one account, one deploy, and no CORS or public URL. **"Free stores text only" is dropped** — it existed to spare metered Storage egress, R2 does not charge egress, and the pricing table advertises 50 MB on Free anyway. Storage is now metered per plan against `plans.storage_mb` (413 on overflow, read fail-open). Extraction stays in the **browser**: pdf.js and mammoth are multi-MB and DOM-bearing and a Worker request has a CPU budget in milliseconds. §3.3. |
 | 2026-10-05 | **Free-mode coordinates may be negative; there is no normalisation step.** `#graph-canvas` has no `overflow` rule and `#graph-edges` sets `overflow: visible`, so the world left of the origin already paints — the camera was built precisely so there would be no edge. Shifting saved coordinates back to a non-negative origin would translate the *whole* board on screen mid-drag (relative positions survive a translation, the camera does not absorb it), so the saved value is the displayed value and there is nothing to correct for drift. The only code that assumed an origin was `placeCamera()`; it now takes `baseX/baseY` and is provably identical to the old expression over 5000 samples whenever they are 0 — which is every Aligned case. Layout lives in **`profiles.graph_layout`** (one jsonb column, not a table) because it is one person's view preference written as a whole and no query needs to look inside it. The write path was *probed*, not assumed: `profiles: write own` looks sufficient to promote yourself on paper (PostgreSQL ORs a command's checks), but `private.guard_profile_elevation` blocks it — tested with a throwaway identity as `authenticated`, blocked, cleaned up in the same statement. That trigger only fires on `role`/`plan`/`plan_expires_at`, so layout passes through. P1.35. |
+| 2026-10-05 | **Graph search matches in SQL and returns ids only.** jsonb has no substring operator, so PostgREST cannot search `messages` — and matching `col::text` would be *worse than useless*: `[{"role":"user",...}]` contains "role", "content" and "user" in every row, so those words return the entire account, as **hollow** hits the caller can never see because only ids come back. `public.search_conversations` is **SECURITY INVOKER** (RLS picks the rows; the Worker stays a translator, never a trust boundary) and uses jsonpath to reach only `messages[].content`, `explains.selection` and `explains.messages[].content` — schema keys are unreachable by design (`parentId` → 0, measured). **No index**, deliberately: a leading-wildcard LIKE cannot use one, and a stored tsvector would be recomputed on *every* message write. EXECUTE is revoked `from public, anon` — revoking `anon` alone is a no-op while `PUBLIC` still grants it, the same lesson this table already records above. The **client** does the locating, because only it knows where it wants the camera to land; shipping message bodies down just to throw them away would defeat the point. P1.36. |
 
 ---
 
