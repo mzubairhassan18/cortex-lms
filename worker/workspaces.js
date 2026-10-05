@@ -39,7 +39,33 @@ async function counts(env, request) {
 }
 
 export async function listWorkspaces(env, request) {
-  const rows = await rest(env, request, `workspaces?select=${COLS}&order=created_at.asc`);
+  let rows = await rest(env, request, `workspaces?select=${COLS}&order=created_at.asc`);
+
+  /* server.js ran migrateWorkspaces() at startup and guaranteed there was
+   * always exactly one workspace to land in, because every conversation must
+   * belong to one. A Worker has no startup — it is stateless and may be
+   * running someone else's request a millisecond ago — so the same guarantee
+   * is made on first read instead, once per user. Without it a fresh sign-in
+   * renders an empty app whose first message is refused with "Create a
+   * workspace first.", with nothing on screen explaining why. */
+  if (!rows.length) {
+    try {
+      const [created] = await write(
+        env,
+        request,
+        'workspaces',
+        { id: newId(), name: 'My workspace' },
+        'POST',
+      );
+      rows = [created];
+    } catch {
+      // If the insert is refused (expired token mid-flight, policy change),
+      // answer with the empty list rather than failing the read: the UI has
+      // an empty state for exactly this, and a 500 here would break app boot.
+      rows = [];
+    }
+  }
+
   const by = await counts(env, request);
   return json(rows.map((r) => row(r, by.get(r.id))));
 }
