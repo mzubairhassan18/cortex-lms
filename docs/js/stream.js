@@ -235,7 +235,15 @@ export async function streamChat(messages, streamer, signal, opts) {
 
       if (!res.ok || !res.body) {
         const errText = await res.text().catch(() => '');
-        const e = new Error(`Server error ${res.status}: ${errText.slice(0, 300)}`);
+        // Our own API answers {"error":"..."} — show that sentence rather than
+        // the JSON wrapper, so a quota refusal reads as prose instead of
+        // `Server error 429: {"error":"Daily limit ...}`.
+        let msg = errText.slice(0, 300);
+        try {
+          const parsed = JSON.parse(errText);
+          if (parsed && parsed.error) msg = parsed.error;
+        } catch { /* not our shape — keep the raw body */ }
+        const e = new Error(`Server error ${res.status}: ${msg}`);
         e.httpStatus = res.status;
         throw e;
       }
@@ -297,6 +305,10 @@ export async function streamChat(messages, streamer, signal, opts) {
         return;
       }
       lastErr = e;
+      // A 4xx is an answer, not a hiccup: retrying a quota refusal (or a bad
+      // request) only waits and fails again, and each attempt would re-run
+      // the quota check. 5xx and timeouts are still worth one quiet retry.
+      if (e.httpStatus >= 400 && e.httpStatus < 500) break;
       // Only a quiet retry can help, and only before anything was delivered.
       if (attempt < MAX_ATTEMPTS && !receivedAny && !timedOut) {
         await sleep(1200);

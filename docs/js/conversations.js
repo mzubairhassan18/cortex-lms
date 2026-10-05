@@ -22,7 +22,16 @@ export async function loadConversations() {
     // Scoped to the open workspace — another workspace's chats never leak in.
     const ws = state.workspaceId ? `?workspace=${encodeURIComponent(state.workspaceId)}` : '';
     const res = await fetch(`/api/conversations${ws}`);
-    state.conversations = await res.json();
+    const data = await res.json();
+    /*
+     * Only an actual list may land in state. A failed call answers
+     * {"error": "..."}, and assigning that object is what leaves
+     * `state.conversations.length` undefined (so the list renders empty with
+     * no explanation) and makes `.unshift()` explode the next time a message
+     * is sent. The UI's empty state is the honest response to "we don't have
+     * the list", not a silently corrupted one.
+     */
+    state.conversations = res.ok && Array.isArray(data) ? data : [];
   } catch {
     state.conversations = [];
   }

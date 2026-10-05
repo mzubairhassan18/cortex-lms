@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cortex — admin</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" type="image/svg+xml" href="/cortex-lms/icon.svg">
+  <link rel="stylesheet" href="/cortex-lms/landing.css">
+  <script>
+    /* Same key and same no-flash trick as the rest of the site. */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('lb.theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      }
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <style>
+    /*
+     * The gate here is UX only, same as the app and the payment screen:
+     * requireSession() bounces a visitor to /login, and /api/admin refuses
+     * anyone whose profiles.role is not admin. A visitor who skips this
+     * redirect reads nothing — every query behind it is RLS-scoped to
+     * private.is_admin().
+     */
+    .adm-hero { max-width: 780px; margin: 0 auto; text-align: center; padding: 66px 20px 24px; }
+    .adm-hero h1 { font-size: clamp(28px, 4.6vw, 42px); line-height: 1.07; letter-spacing: -.03em; margin: 12px 0; }
+    .adm-hero p { color: var(--text-dim); font-size: 16px; line-height: 1.6; }
+
+    .adm-wrap { max-width: 1020px; margin: 0 auto; padding: 8px 20px 60px; display: grid; gap: 20px; }
+
+    .kpis { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .kpi {
+      background: var(--bg-panel); border: 1px solid var(--border);
+      border-radius: 16px; padding: 18px 18px 16px;
+    }
+    .kpi .k-label { font-size: 12px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-dim); }
+    .kpi .k-value { font-size: 30px; font-weight: 700; letter-spacing: -.02em;
+      margin-top: 6px; font-variant-numeric: tabular-nums; }
+    .kpi .k-hint { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+    .adm-card {
+      background: var(--bg-panel); border: 1px solid var(--border);
+      border-radius: 18px; padding: 24px;
+    }
+    .adm-card h2 { font-size: 17px; margin: 0 0 4px; letter-spacing: -.01em; }
+    .adm-card .sub { color: var(--text-dim); font-size: 14.5px; margin: 0 0 18px; line-height: 1.55; }
+
+    .gauge { display: grid; gap: 8px; padding: 14px 0; border-top: 1px solid var(--border); }
+    .gauge:first-of-type { border-top: none; padding-top: 0; }
+    .gauge-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; font-size: 14.5px; }
+    .gauge-head b { font-size: 15px; }
+    .gauge-head .g-users { color: var(--text-dim); }
+    .gauge-head .g-pct { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 700; }
+    .gauge-bar { height: 9px; border-radius: 999px; background: var(--bg-raise);
+      border: 1px solid var(--border); overflow: hidden; }
+    .gauge-fill { height: 100%; width: 0; border-radius: 999px; background: var(--accent2);
+      transition: width .4s ease; }
+    .gauge-fill.warn  { background: #e3b341; }
+    .gauge-fill.high  { background: #db9d3f; }
+    .gauge-fill.crit  { background: #d9534f; }
+    .gauge-note { font-size: 13px; color: var(--text-dim); }
+    .gauge-note.alert { color: #e3b341; font-weight: 600; }
+    .gauge-note.crit  { color: #d9534f; font-weight: 600; }
+
+    .claim {
+      border: 1px solid var(--border); border-radius: 14px;
+      background: var(--bg-raise); padding: 16px; margin-bottom: 12px;
+      display: grid; gap: 10px;
+    }
+    .claim-row { display: flex; gap: 12px 18px; align-items: baseline; flex-wrap: wrap; font-size: 14.5px; }
+    .claim .who { font-weight: 650; }
+    .claim .who small { display: block; font-weight: 400; color: var(--text-dim); font-size: 13px; }
+    .claim .amt { font-variant-numeric: tabular-nums; font-weight: 650; }
+    .claim .ref { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px; color: var(--text-dim); }
+    .claim .when { margin-left: auto; color: var(--text-dim); font-size: 13.5px; }
+    .claim .uid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px; color: var(--text-dim); word-break: break-all; }
+    .claim-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .claim-actions input {
+      flex: 1 1 200px; min-width: 160px; background: var(--bg-panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px;
+      font-size: 13.5px; outline: none;
+    }
+    .claim-actions input:focus { border-color: var(--accent); }
+    .btn-approve, .btn-reject {
+      padding: 9px 16px; border-radius: 10px; font-size: 14px; font-weight: 650;
+      cursor: pointer; border: 1px solid var(--border);
+    }
+    .btn-approve { background: var(--accent2); color: #fff; border-color: transparent; }
+    .btn-reject  { background: var(--bg-panel); color: #d9534f; }
+    .btn-approve:disabled, .btn-reject:disabled { opacity: .55; cursor: default; }
+    .chip {
+      padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+      letter-spacing: .04em; text-transform: uppercase;
+    }
+    .chip.pending  { background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-dim); }
+    .chip.approved { background: rgba(46,160,67,.16); color: var(--accent2); border: 1px solid var(--accent2); }
+    .chip.rejected { background: rgba(217,83,79,.14); color: #d9534f; border: 1px solid #d9534f; }
+    .claim .note { font-size: 13.5px; color: var(--text-dim); }
+
+    .empty { color: var(--text-dim); font-size: 14.5px; padding: 6px 0; }
+    .adm-msg { font-size: 14.5px; min-height: 1.2em; margin-top: 10px; }
+    .adm-msg.err { color: #d9534f; }
+    .adm-msg.ok  { color: var(--accent2); }
+    .denied { text-align: center; padding: 40px 20px; color: var(--text-dim); }
+    .denied b { color: var(--text); }
+  </style>
+</head>
+<body>
+
+<header class="nav">
+  <a class="brand" href="/cortex-lms/"><span class="brand-mark">🧠</span> Cortex</a>
+  <nav class="nav-links">
+    <a href="/cortex-lms/pricing">Pricing</a>
+    <a href="/cortex-lms/payment">Payment</a>
+  </nav>
+  <div class="nav-cta">
+    <a class="btn btn-ghost" href="/cortex-lms/app">Open the app</a>
+  </div>
+</header>
+
+<main>
+
+  <section class="adm-hero">
+    <p class="eyebrow">Admin</p>
+    <h1>Dashboard</h1>
+    <p>Users, requests processed, and how close each plan is to the daily limit
+      it advertises — plus the queue of bank transfers waiting to be matched.</p>
+  </section>
+
+  <div class="adm-wrap">
+
+    <div class="kpis" id="kpis">
+      <div class="kpi"><div class="k-label">Loading</div><div class="k-value">…</div></div>
+    </div>
+
+    <section class="adm-card">
+      <h2>Plan usage today</h2>
+      <p class="sub">Requests used against the pooled daily allowance for every
+        user on that plan. Amber at 70%, orange at 85%, red at 95%.</p>
+      <div id="gauges"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section class="adm-card">
+      <h2>Payment claims</h2>
+      <p class="sub">Approving sets the claimant's plan immediately; the row is
+        kept as the record of what was paid.</p>
+      <div id="claims"><div class="empty">Loading…</div></div>
+      <div class="adm-msg" id="adm-msg" role="status" aria-live="polite"></div>
+    </section>
+
+  </div>
+
+</main>
+
+<script src="/cortex-lms/vendor/supabase.js"></script>
+<script type="module" src="/cortex-lms/js/admin-page.js"></script>
+
+</body>
+</html>

@@ -32,6 +32,73 @@ export const client =
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
     : null;
 
+/*
+ * Attach the session token to our own /api/ requests.
+ *
+ * There are 25 `fetch('/api/...')` call sites and not one of them carried an
+ * Authorization header — v1's Express server needed no credentials because it
+ * had no users, it just read a file from disk. The Worker is different: it
+ * forwards whatever Authorization it receives to PostgREST, and that is what
+ * makes auth.uid() resolve so the RLS policies can do the scoping. Without it
+ * every call answers 401 and the app silently falls back to its offline
+ * defaults (which is how the provider list collapses to a single "Local
+ * (Ollama)" entry — the real list never arrives).
+ *
+ * Wrapping fetch here rather than editing 25 call sites keeps the token in one
+ * place and makes forgetting it impossible for the next call site.
+ *
+ * Scope is deliberately narrow: same origin AND path /api/. Anything else
+ * keeps its original headers — sending our access token cross-origin would be
+ * handing it to somebody else's server.
+ *
+ * getSession() rather than a raw localStorage read, because supabase-js
+ * refreshes an expired token inside getSession(); a direct key read would
+ * cheerfully send a token that is already dead.
+ */
+const ORIGIN = typeof location !== 'undefined' ? location.origin : '';
+
+function isOursApi(url) {
+  if (!ORIGIN || !url) return false;
+  let u;
+  try {
+    u = new URL(url, ORIGIN);
+  } catch {
+    return false;
+  }
+  return u.origin === ORIGIN && u.pathname.startsWith('/api/');
+}
+
+function installApiAuth() {
+  if (typeof window === 'undefined' || typeof window.fetch !== 'function' || !client) return;
+  const original = window.fetch.bind(window);
+
+  window.fetch = async (input, init) => {
+    const isReq = typeof Request !== 'undefined' && input instanceof Request;
+    const url =
+      typeof input === 'string' ? input : isReq ? input.url : (input && input.url) || '';
+    if (!isOursApi(url)) return original(input, init);
+
+    const headers = new Headers(
+      (init && init.headers) || (isReq ? input.headers : undefined),
+    );
+    if (!headers.has('Authorization')) {
+      try {
+        const { data } = await client.auth.getSession();
+        const token = data && data.session && data.session.access_token;
+        if (token) headers.set('Authorization', `Bearer ${token}`);
+      } catch {
+        /* Signed out or refreshing: let it through unauthenticated. The Worker
+           answers 401 and the gate is what decides where the user goes. */
+      }
+    }
+
+    if (isReq) return original(new Request(input, { headers }));
+    return original(input, { ...(init || {}), headers });
+  };
+}
+
+installApiAuth();
+
 function isLocalhost() {
   const h = location.hostname;
   return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]';

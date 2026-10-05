@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cortex — pay by bank transfer</title>
+  <meta name="description" content="Pay for Cortex Pro or Team by bank transfer, then file a claim for an administrator to approve.">
+  <link rel="icon" type="image/svg+xml" href="/cortex-lms/icon.svg">
+  <link rel="stylesheet" href="/cortex-lms/landing.css">
+  <script>
+    /* Same key and same no-flash trick as the app, landing and pricing. */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('lb.theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      }
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <style>
+    /*
+     * Bank details are NOT hardcoded here. They come from
+     * platform_settings.bank_details through /api/payment, because anon has
+     * every table privilege revoked and a static host has nothing to read —
+     * change the account in the dashboard and this page follows.
+     */
+    .pay-hero { max-width: 760px; margin: 0 auto; text-align: center; padding: 72px 20px 30px; }
+    .pay-hero h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.06; letter-spacing: -.03em; margin: 12px 0; }
+    .pay-hero p { color: var(--text-dim); font-size: 16.5px; line-height: 1.6; }
+
+    .pay-wrap { max-width: 980px; margin: 0 auto; padding: 10px 20px 60px; display: grid; gap: 20px; }
+    .pay-card {
+      background: var(--bg-panel); border: 1px solid var(--border);
+      border-radius: 18px; padding: 24px;
+    }
+    .pay-card h2 { font-size: 17px; margin: 0 0 4px; letter-spacing: -.01em; }
+    .pay-card .sub { color: var(--text-dim); font-size: 14.5px; margin: 0 0 16px; line-height: 1.55; }
+
+    .bank { display: grid; gap: 10px; }
+    .bank-row { display: flex; gap: 14px; align-items: baseline; font-size: 14.5px; }
+    .bank-row dt { color: var(--text-dim); min-width: 132px; flex: none; }
+    .bank-row dd { margin: 0; font-weight: 600; word-break: break-word; }
+    .bank-note {
+      margin-top: 16px; padding: 11px 13px; border-radius: 10px;
+      background: var(--bg-raise); border: 1px solid var(--border);
+      font-size: 14px; color: var(--text-dim); line-height: 1.5;
+    }
+
+    .tiers-pick { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); margin-bottom: 18px; }
+    .tier-opt { position: relative; }
+    .tier-opt input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+    .tier-opt span {
+      display: block; padding: 15px 16px; border: 1px solid var(--border);
+      border-radius: 14px; background: var(--bg-raise); cursor: pointer;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .tier-opt b { display: block; font-size: 15px; margin-bottom: 3px; }
+    .tier-opt em { font-style: normal; color: var(--text-dim); font-size: 14px; }
+    .tier-opt input:checked + span { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .tier-opt input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .field { display: grid; gap: 7px; margin-bottom: 16px; }
+    .field label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+    .field input {
+      width: 100%; box-sizing: border-box; background: var(--bg-panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px; padding: 10px 11px;
+      font-size: 14px; outline: none;
+    }
+    .field input:focus { border-color: var(--accent); }
+
+    .btn-pay {
+      width: 100%; padding: 12px 16px; border: none; border-radius: 12px;
+      background: var(--accent); color: var(--on-accent);
+      font-weight: 650; font-size: 15px; cursor: pointer;
+    }
+    .btn-pay:disabled { opacity: .6; cursor: default; }
+    .pay-msg { margin-top: 12px; font-size: 14.5px; line-height: 1.5; min-height: 1em; }
+    .pay-msg.err { color: #d9534f; }
+    .pay-msg.ok { color: var(--accent2); }
+
+    .claims { display: grid; gap: 10px; }
+    .claim {
+      display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+      padding: 13px 15px; border: 1px solid var(--border); border-radius: 12px;
+      background: var(--bg-raise); font-size: 14.5px;
+    }
+    .claim .who { font-weight: 650; }
+    .claim .amt { font-variant-numeric: tabular-nums; }
+    .claim .ref { color: var(--text-dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    .claim .when { color: var(--text-dim); font-size: 13.5px; margin-left: auto; }
+    .chip {
+      padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+      letter-spacing: .04em; text-transform: uppercase;
+    }
+    .chip.pending { background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-dim); }
+    .chip.approved { background: rgba(46, 160, 67, .16); color: var(--accent2); border: 1px solid var(--accent2); }
+    .chip.rejected { background: rgba(217, 83, 79, .14); color: #d9534f; border: 1px solid #d9534f; }
+    .claim .note { flex-basis: 100%; color: var(--text-dim); font-size: 13.5px; }
+    .empty { color: var(--text-dim); font-size: 14.5px; }
+
+    .plan-now { margin-bottom: 18px; font-size: 14.5px; color: var(--text-dim); }
+    .plan-now b { color: var(--text); }
+  </style>
+</head>
+<body>
+
+<header class="nav">
+  <a class="brand" href="/cortex-lms/"><span class="brand-mark">🧠</span> Cortex</a>
+  <nav class="nav-links">
+    <a href="/cortex-lms/#features">Features</a>
+    <a href="/cortex-lms/pricing">Pricing</a>
+  </nav>
+  <div class="nav-cta">
+    <a class="btn btn-ghost" href="/cortex-lms/app">Open the app</a>
+  </div>
+</header>
+
+<main>
+
+  <section class="pay-hero">
+    <p class="eyebrow">Payment</p>
+    <h1>Pay by bank transfer</h1>
+    <p>Transfer the amount, paste the reference below, and an administrator
+      activates your plan — normally the same day. Nothing auto-renews, and
+      Cortex never sees a card.</p>
+  </section>
+
+  <div class="pay-wrap">
+
+    <article class="pay-card">
+      <h2>Where to send it</h2>
+      <p class="sub">Use your Cortex user ID as the transfer reference — it is
+        printed below the details.</p>
+      <div class="plan-now" id="plan-now"></div>
+      <dl class="bank" id="bank-details"><div class="empty">Loading…</div></dl>
+      <div class="bank-note" id="bank-note" hidden></div>
+    </article>
+
+    <article class="pay-card">
+      <h2>I have paid</h2>
+      <p class="sub">File a claim so it can be matched against the account.</p>
+
+      <div class="tiers-pick" id="tier-pick"></div>
+
+      <div class="field">
+        <label for="claim-ref">Transfer reference</label>
+        <input id="claim-ref" type="text" maxlength="120" autocomplete="off"
+               spellcheck="false" placeholder="As it appears on the transfer">
+      </div>
+
+      <button class="btn-pay" id="claim-send" type="button">I have paid</button>
+      <div class="pay-msg" id="claim-msg" role="status" aria-live="polite"></div>
+    </article>
+
+    <article class="pay-card">
+      <h2>Your claims</h2>
+      <p class="sub">Approval sets the plan immediately; the row stays here as
+        the record.</p>
+      <div class="claims" id="claims-list"><div class="empty">Loading…</div></div>
+    </article>
+
+  </div>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <span class="brand"><span class="brand-mark">🧠</span> Cortex</span>
+    <div class="footer-links">
+      <a href="/cortex-lms/#features">Features</a>
+      <a href="/cortex-lms/pricing">Pricing</a>
+      <a href="/cortex-lms/signup">Sign up</a>
+    </div>
+    <p>Free tier, no card required · Bring your own model key</p>
+  </div>
+</footer>
+
+<script src="/cortex-lms/vendor/supabase.js"></script>
+<script type="module" src="/cortex-lms/js/payment-page.js"></script>
+
+</body>
+</html>

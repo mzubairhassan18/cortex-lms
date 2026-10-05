@@ -61,7 +61,20 @@ export async function createConversation() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title: 'New conversation', workspaceId: state.workspaceId || undefined }),
   });
-  const conv = await res.json();
+  const conv = await res.json().catch(() => ({}));
+
+  /*
+   * A failed create must never be treated as a conversation. `conv` used to be
+   * assigned straight from the body, so a 401/500 answered {"error": "..."}
+   * and that object went into the list — which is what left currentId
+   * undefined and made the very next message throw
+   * "state.conversations.unshift is not a function".
+   */
+  if (!res.ok || !conv.id) {
+    throw new Error(conv.error || 'Could not start a conversation.');
+  }
+  if (!Array.isArray(state.conversations)) state.conversations = [];
+
   state.conversations.unshift(conv);
   state.currentId = conv.id;
   state.messages = [];
@@ -88,7 +101,19 @@ export async function sendMessage() {
   input.value = '';
   autoResize(input);
 
-  if (!state.currentId) await createConversation();
+  if (!state.currentId) {
+    try {
+      await createConversation();
+    } catch (e) {
+      /* Nothing was created, so nothing will be sent. Hand the message back
+         rather than swallowing the text the user already typed, and say why —
+         a silent return here looks like the send button simply does nothing. */
+      input.value = text;
+      autoResize(input);
+      alert(e.message || 'Could not start a conversation.');
+      return;
+    }
+  }
 
   state.messages.push({ role: 'user', content: text });
   // Mirror the server's title rule locally — persist() no longer reloads the

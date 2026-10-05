@@ -219,23 +219,36 @@
             <button id="settings-close" title="Close (containers stay)" class="summary-x"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
           </div>
           <div id="settings-body">
-            <label class="set-label" for="set-provider">Model provider</label>
-            <select id="set-provider"></select>
+            <!--
+              The password field below must live inside a <form> or Chrome logs
+              "Password field is not contained in a form" on every load — it
+              wants a form context to decide autofill behaviour.
+              display:contents keeps the form from generating a box, so
+              #settings-body's flex column and its 8px gap lay out exactly as
+              before; without it every child would collapse into one item.
+              return false stops Enter from submitting (and reloading) — the
+              field did nothing on Enter before the form existed, and the
+              button below is the only way to connect.
+            -->
+            <form id="settings-form" style="display: contents" onsubmit="return false">
+              <label class="set-label" for="set-provider">Model provider</label>
+              <select id="set-provider"></select>
 
-            <div id="set-key-row">
-              <label class="set-label" for="set-key">API key</label>
-              <input id="set-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
-            </div>
+              <div id="set-key-row">
+                <label class="set-label" for="set-key">API key</label>
+                <input id="set-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
+              </div>
 
-            <div id="set-base-row">
-              <label class="set-label" for="set-base">Base URL <span class="set-inline-hint">(optional — OpenAI-compatible endpoints)</span></label>
-              <input id="set-base" type="text" placeholder="https://api.openai.com/v1" spellcheck="false">
-            </div>
+              <div id="set-base-row">
+                <label class="set-label" for="set-base">Base URL <span class="set-inline-hint">(optional — OpenAI-compatible endpoints)</span></label>
+                <input id="set-base" type="text" placeholder="https://api.openai.com/v1" spellcheck="false">
+              </div>
 
-            <div class="set-actions">
-              <button id="set-connect">Connect</button>
-            </div>
-            <div id="set-message" class="set-message"></div>
+              <div class="set-actions">
+                <button id="set-connect">Connect</button>
+              </div>
+              <div id="set-message" class="set-message"></div>
+            </form>
           </div>
         </div>
         <div id="library-overlay" class="hidden">
