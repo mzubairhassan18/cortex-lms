@@ -22,11 +22,12 @@
  */
 import { childrenIndex, panelEl } from './explain-system.js';
 import { confirmCloseExplain } from './explain-lifecycle.js';
-import { selectConversation } from './conversations.js';
+import { deleteConversation, selectConversation } from './conversations.js';
 import { showSidebar, updateCollapsed } from './explain-ui.js';
 import { attachExplainHandlers } from './interactions.js';
 import { $, explainPanels, state } from './state.js';
 import { makeSelectionHandlers } from './selection.js';
+import { hideMenu, showMenu } from './graph-menu.js';
 /* The wheel and pinch recognisers for the canvas. Kept deliberately small: this
  * module still owns the camera (the actual pan/zoom maths) and the drag-to-pan
  * rules, @use-gesture just decodes the input devices. Resolved by the import
@@ -43,6 +44,7 @@ const graphNodes = $('graph-nodes');
 const graphEmpty = $('graph-empty');
 const viewToggle = $('view-toggle');
 const railSettings = $('rail-settings');
+const railLayout = $('rail-layout');
 const railZoomIn = $('rail-zoom-in');
 const railZoomOut = $('rail-zoom-out');
 const railZoomLabel = $('rail-zoom-label');
@@ -184,6 +186,121 @@ function sizeOf(n) {
   return { w: d.w, h: d.h };
 }
 
+/* ================= Aligned / Free ================= */
+
+/*
+ * ALIGNED is what this view has always done: layout() computes every position
+ * from the model alone, on every render, so nothing can be moved and nothing
+ * has to be remembered.
+ *
+ * FREE keeps that computation and lets a SAVED coordinate win. Nodes nobody has
+ * touched still follow the computed layout — deliberately: the computed column
+ * shifts when conversations are added or removed, and a position you never
+ * chose should not be frozen in place by accident.
+ *
+ * Coordinates are world coordinates and MAY BE NEGATIVE. #graph-canvas has no
+ * overflow rule and #graph-edges sets overflow:visible, so left of the origin
+ * paints fine. Normalising to a non-negative origin would shift the whole board
+ * on screen in the middle of a drag, which is why placeCamera() tracks
+ * baseX/baseY instead of assuming the content starts at 0.
+ */
+
+let layoutMode = 'aligned';   // 'aligned' | 'free'
+let layoutPositions = {};     // node key -> { x, y }, world coords
+let layoutLoaded = false;
+let layoutTimer = 0;
+
+const isFree = () => layoutMode === 'free';
+
+function applyModeChrome() {
+  if (railLayout) {
+    railLayout.textContent = isFree() ? 'Free' : 'Aligned';
+    railLayout.classList.toggle('free', isFree());
+    railLayout.title = isFree()
+      ? 'Layout — Free: drag a conversation anywhere. Right-click the board for options.'
+      : 'Layout — Aligned: the board is placed for you. Click to switch to Free.';
+  }
+  graphCanvas.classList.toggle('free', isFree());
+}
+
+async function loadLayout() {
+  if (layoutLoaded) return;
+  layoutLoaded = true;
+  try {
+    const r = await fetch('/api/layout');
+    if (r.ok) {
+      const d = await r.json();
+      if (d && d.mode === 'free') layoutMode = 'free';
+      /*
+       * Merge, never replace. The fetch is in flight while the board is already
+       * live, so a drag can land first — spreading the server copy UNDER the
+       * local one keeps that drag and still restores everything else that was
+       * saved on another machine.
+       */
+      if (d && d.positions && typeof d.positions === 'object') {
+        layoutPositions = { ...d.positions, ...layoutPositions };
+      }
+    }
+  } catch { /* stay Aligned — the board still lays itself out */ }
+  applyModeChrome();
+  /* The board may already have painted as Aligned; repaint it as the user left
+   * it. No schedule() when nothing was saved, so an Aligned user never pays
+   * for a render they did not need. */
+  if (isFree() && Object.keys(layoutPositions).length) schedule();
+}
+
+function saveLayout() {
+  clearTimeout(layoutTimer);
+  layoutTimer = setTimeout(async () => {
+    try {
+      await fetch('/api/layout', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: layoutMode, positions: layoutPositions }),
+      });
+    } catch { /* keep the local copy — the next change sends it again */ }
+  }, 400);
+}
+
+/*
+ * The one place a Free coordinate is applied.
+ *
+ * Everything else — node sizes, edges, the canvas box — still comes from the
+ * aligned computation, so a saved position only ever replaces x/y. A node with
+ * no saved entry falls through to the computed one, which is why the board
+ * stays sensible for trees nobody has dragged.
+ */
+function layout(model) {
+  const out = layoutAligned(model);
+  if (!isFree() || !Object.keys(layoutPositions).length) return out;
+
+  for (const [key, p] of out.pos) {
+    const saved = layoutPositions[key];
+    if (!saved) continue;
+    p.x = saved.x;
+    p.y = saved.y;
+  }
+
+  /* W/H/minX/minY describe the PRE-overlay positions, so recompute them: the
+   * canvas must be as large as the arrangement now is, and the camera needs to
+   * know how far left and up the board reaches before it can frame it. */
+  let W = 0;
+  let H = 0;
+  let minX = 0;
+  let minY = 0;
+  for (const p of out.pos.values()) {
+    if (p.x + p.w > W) W = p.x + p.w;
+    if (p.y + p.h > H) H = p.y + p.h;
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+  }
+  out.W = W;
+  out.H = H;
+  out.minX = minX;
+  out.minY = minY;
+  return out;
+}
+
 /*
  * Column 0 is a plain vertical stack (+, conversations, +) with the summary
  * hanging off its LEFT side. The explanations hang off it as a tree, and the
@@ -197,7 +314,7 @@ function sizeOf(n) {
  * the branch above it. That is what `extent()` answers — from the tree alone,
  * and before any position exists.
  */
-function layout(model) {
+function layoutAligned(model) {
   const pos = new Map();
 
   /*
@@ -256,11 +373,18 @@ function layout(model) {
   const box = () => {
     let W = col0w;
     let H = y;
+    /* minX/minY are the NEGATIVE reach of the board. In Aligned they are
+     * always 0 (liftBoard() guarantees y >= 0 and nothing starts left of 0),
+     * so placeCamera()'s arithmetic reduces to exactly what it was. */
+    let minX = 0;
+    let minY = 0;
     for (const p of pos.values()) {
       if (p.x + p.w > W) W = p.x + p.w;
       if (p.y + p.h > H) H = p.y + p.h;
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
     }
-    return { pos, W, H };
+    return { pos, W, H, minX, minY };
   };
 
   if (!model.exps.length) {
@@ -653,6 +777,8 @@ let camX = 0;
 let camY = 0;
 let baseW = 0;            // unscaled canvas size, straight from layout()
 let baseH = 0;
+let baseX = 0;            // how far left/up the board reaches (0 unless Free)
+let baseY = 0;
 let camTouched = false;   // once the user moves it, stop re-centring for them
 let lastZoomNotified = -1;
 
@@ -663,11 +789,26 @@ const clampZoom = (z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
  * closer than CAM_PAD to the top or left. So: when it fits, it is centred with
  * space on all four sides; when it does not, it starts one pad below the header
  * and the rest is one drag away — never off the top edge with nowhere to go.
+ *
+ * baseX/baseY carry the board's LEFT/TOP reach. In Aligned they are 0 and the
+ * two expressions below reduce exactly to `max(CAM_PAD, centred)` — the
+ * arithmetic this always did. In Free they can be negative (the arrangement may
+ * sit above or left of the origin), so centring has to be measured from
+ * baseX/baseY rather than from 0, and the pad has to be applied to the edge
+ * that is actually nearest the header.
  */
 function placeCamera() {
   if (camTouched) return;
-  camX = Math.round(Math.max(CAM_PAD, (graphScroll.clientWidth - baseW * zoom) / 2));
-  camY = Math.round(Math.max(CAM_PAD, (graphScroll.clientHeight - baseH * zoom) / 2));
+  const cw = graphScroll.clientWidth;
+  const ch = graphScroll.clientHeight;
+  camX = Math.round(Math.max(
+    CAM_PAD - baseX * zoom,
+    (cw - (baseW - baseX) * zoom) / 2 - baseX * zoom,
+  ));
+  camY = Math.round(Math.max(
+    CAM_PAD - baseY * zoom,
+    (ch - (baseH - baseY) * zoom) / 2 - baseY * zoom,
+  ));
 }
 
 function applyCamera() {
@@ -897,6 +1038,202 @@ function onKeyUp(e) {
 
 /* ---------------- render ---------------- */
 
+/* ---------------- Free mode: dragging a conversation ---------------- */
+
+let drag = null;
+
+/*
+ * The nodes that travel with a conversation.
+ *
+ * Explanations live ON the conversation row and only the ACTIVE conversation's
+ * are built into nodes, so the tree that can be dragged together is exactly
+ * what is on the board for the current conversation: it, the summary hanging to
+ * its left, and every explanation. A conversation that is not active has no
+ * children rendered, so it moves alone — which is still enough to pull one tree
+ * clear of another, since that is what the user is separating.
+ */
+function treeKeys(convKey) {
+  const keys = [convKey];
+  if (convKey !== 'c:' + state.currentId) return keys;
+  if (nodeEls.has('summary')) keys.push('summary');
+  for (const k of nodeEls.keys()) if (k.startsWith('e:')) keys.push(k);
+  return keys;
+}
+
+function startNodeDrag(e) {
+  if (!isFree() || e.button !== 0) return;
+  const gnode = e.target.closest('.gnode');
+  if (!gnode || gnode.dataset.kind !== 'conv') return;
+  /* Grab by the header. The body of the active conversation IS the live chat,
+   * and a pointerdown there is somebody about to select text — taking that
+   * gesture would fight the user for every click in the conversation. */
+  if (!e.target.closest('.gn-head')) return;
+  if (e.target.closest('button, a, input, textarea, select, [contenteditable]')) return;
+
+  const key = 'c:' + gnode.dataset.id;
+  const from = {};
+  for (const k of treeKeys(key)) {
+    const el = nodeEls.get(k);
+    if (!el) continue;
+    /* Read the PLACED position off the element rather than out of
+     * layoutPositions: a node nobody has moved has no entry there yet, and it
+     * has to start from where the board actually put it. */
+    from[k] = {
+      x: parseFloat(el.style.left) || 0,
+      y: parseFloat(el.style.top) || 0,
+    };
+  }
+  if (!Object.keys(from).length) return;
+
+  drag = { sx: e.clientX, sy: e.clientY, from, moved: false };
+  gnode.classList.add('dragging');
+  window.addEventListener('pointermove', onDragMove);
+  window.addEventListener('pointerup', endNodeDrag);
+  window.addEventListener('pointercancel', endNodeDrag);
+}
+
+function onDragMove(e) {
+  if (!drag) return;
+  const dx = e.clientX - drag.sx;
+  const dy = e.clientY - drag.sy;
+  if (!drag.moved) {
+    /* A 3px threshold keeps a mouse that jitters while clicking from being read
+     * as a drag — and therefore from being swallowed instead of opening the
+     * node the user meant to open. */
+    if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+    drag.moved = true;
+    /*
+     * Claim the framing. A drag changes the canvas box, so if placeCamera()
+     * kept re-centring on every frame it would slide the board sideways in
+     * proportion to how far the node had moved — the node would appear to lag
+     * the cursor, or barely move at all. Panning and zooming claim it for the
+     * same reason; a first-time drag has to as well.
+     */
+    camTouched = true;
+  }
+  const wx = dx / zoom;
+  const wy = dy / zoom;
+  for (const [k, p] of Object.entries(drag.from)) {
+    layoutPositions[k] = { x: Math.round(p.x + wx), y: Math.round(p.y + wy) };
+  }
+  schedule();
+}
+
+function endNodeDrag() {
+  window.removeEventListener('pointermove', onDragMove);
+  window.removeEventListener('pointerup', endNodeDrag);
+  window.removeEventListener('pointercancel', endNodeDrag);
+  for (const el of document.querySelectorAll('.gnode.dragging')) el.classList.remove('dragging');
+  const moved = !!(drag && drag.moved);
+  drag = null;
+  if (!moved) return;
+  swallowUntil = Date.now() + 250; // the drag must not also open the node
+  saveLayout();
+}
+
+/* ---------------- right-click ---------------- */
+
+function canvasMenu(e) {
+  const items = [{ label: 'Create conversation', onSelect: () => newChatBtn.click() }];
+  if (!isFree()) {
+    items.push({ sep: true });
+    items.push({ label: 'Switch to Free', onSelect: () => setLayoutMode('free') });
+  } else if (Object.keys(layoutPositions).length) {
+    items.push({ sep: true });
+    items.push({
+      label: 'Reset positions',
+      onSelect: () => {
+        layoutPositions = {};
+        saveLayout();
+        schedule();
+      },
+    });
+  }
+  showMenu(e.clientX, e.clientY, items);
+}
+
+function convMenu(e, gnode) {
+  const id = gnode.dataset.id;
+  const isCurrent = id === state.currentId;
+  const items = [];
+
+  /* The active conversation is already open — offering "Open" for it would be
+   * a row that does nothing. */
+  if (!isCurrent) items.push({ label: 'Open', onSelect: () => selectConversation(id) });
+
+  if (isCurrent) {
+    if (state.explains.roots.length) {
+      items.push({
+        label: 'Show all explanations',
+        onSelect: () => {
+          for (const rid of state.explains.roots) {
+            openExplains.add(rid);
+            userCollapsed.delete(rid);
+          }
+          schedule();
+        },
+      });
+    }
+    items.push({ label: 'Show summary', onSelect: () => openSummary(id) });
+  }
+
+  items.push({ sep: true });
+  items.push({
+    label: 'Delete',
+    danger: true,
+    onSelect: () => {
+      deleteConversation(id, e);
+      delete layoutPositions['c:' + id];
+      saveLayout();
+    },
+  });
+  showMenu(e.clientX, e.clientY, items);
+}
+
+function explainMenu(e, gnode) {
+  const id = gnode.dataset.id;
+  const open = isExpOpen(id);
+  showMenu(e.clientX, e.clientY, [
+    { label: open ? 'Collapse' : 'Expand', onSelect: () => toggleExplain(id) },
+    { sep: true },
+    { label: 'Close explanation', danger: true, onSelect: () => confirmCloseExplain(gnode, id) },
+  ]);
+}
+
+function onContextMenu(e) {
+  if (state.view !== 'graph') return;
+  const t = e.target;
+  /* Leave the browser's menu alone over anything that is really a control — a
+   * link still deserves "Open in new tab", a field still deserves "Paste". */
+  if (t.closest && t.closest('a, input, textarea, select, [contenteditable]')) return;
+  const sel = window.getSelection && window.getSelection();
+  if (sel && String(sel).length) return; // right-clicking a selection copies it
+
+  e.preventDefault();
+  const gnode = t.closest && t.closest('.gnode');
+  if (!gnode) return canvasMenu(e);
+  /*
+   * Inside the PARKED content — the live chat, an open explanation, the
+   * summary — the browser's menu is the right one: that is where copy, paste
+   * and "search with" live, and stealing it there would be a regression, not
+   * an enhancement. The node's own chrome (header, preview, meta) is where the
+   * object's menu belongs.
+   */
+  if (t.closest('.gn-host')) return;
+  if (gnode.dataset.kind === 'conv') return convMenu(e, gnode);
+  if (gnode.dataset.kind === 'explain') return explainMenu(e, gnode);
+  return canvasMenu(e);
+}
+
+function setLayoutMode(mode) {
+  const next = mode === 'free' ? 'free' : 'aligned';
+  if (next === layoutMode) return;
+  layoutMode = next;
+  applyModeChrome();
+  saveLayout();
+  schedule();
+}
+
 function render() {
   if (state.view !== 'graph') return;
 
@@ -913,7 +1250,7 @@ function render() {
   lastActive = active;
 
   const model = build();
-  const { pos, W, H } = layout(model);
+  const { pos, W, H, minX, minY } = layout(model);
 
   const seen = new Set();
   for (const n of model.col0) {
@@ -940,6 +1277,8 @@ function render() {
   graphCanvas.style.height = H + 'px';
   baseW = W;
   baseH = H;
+  baseX = minX || 0;           // 0 in Aligned, wherever Free put the board
+  baseY = minY || 0;
   placeCamera();               // only until the user claims the framing
   applyCamera();
   drawEdges(model, pos);
@@ -992,6 +1331,8 @@ function enterGraph() {
 function exitGraph() {
   state.view = 'list';
   state.onGraphChange = null;
+  hideMenu();
+  if (drag) endNodeDrag();   // drop the window listeners with us
   try { localStorage.setItem('lb.view', 'list'); } catch { /* private mode */ }
   document.body.classList.remove('graph-mode');
   graphView.classList.add('hidden');
@@ -1275,6 +1616,14 @@ export function initGraph() {
   applyCamera();
   viewToggle.addEventListener('click', () => setView(state.view === 'graph' ? 'list' : 'graph'));
   railSettings.addEventListener('click', () => settingsBtn.click());
+  /* Right-click and drag-to-place. Both are no-ops in Aligned — the menu still
+   * offers "Create conversation" because that is useful either way, but only a
+   * Free board can be rearranged. */
+  graphScroll.addEventListener('contextmenu', onContextMenu);
+  graphNodes.addEventListener('pointerdown', startNodeDrag);
+  railLayout && railLayout.addEventListener('click', () => setLayoutMode(isFree() ? 'aligned' : 'free'));
+  applyModeChrome();
+  loadLayout();
   applyLabel();
   if (state.view === 'graph') enterGraph();
 }

@@ -319,6 +319,12 @@
         <span>Its explanations branch off to the right once you ask.</span>
       </div>
       <div id="graph-rail">
+        <!--
+          Aligned / Free. Aligned is the computed layout this view has always
+          done; Free lets each node keep its own saved coordinate so a tree can
+          be dragged clear of the others. Right-click the board for the rest.
+        -->
+        <button id="rail-layout" title="Layout — Aligned: nodes are placed for you">Aligned</button>
         <button id="rail-zoom-out" title="Zoom out (−)"><svg class="ico" aria-hidden="true"><use href="#i-minus"></use></svg></button>
         <button id="rail-zoom-label" title="Reset zoom to 100% (0)">100%</button>
         <button id="rail-zoom-in" title="Zoom in (+)"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg></button>
