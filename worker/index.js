@@ -33,6 +33,7 @@ import {
   updateWorkspace,
 } from './workspaces.js';
 import { connect, getModels, getSettings, putSettings } from './settings.js';
+import { getModelInfo } from './model-info.js';
 import { chat } from './chat.js';
 
 export default {
@@ -97,6 +98,7 @@ async function route(request, env, url) {
     return connect(env, request, await read(request));
   }
   if (path === '/api/models' && method === 'GET') return getModels(env, request);
+  if (path === '/api/model-info' && method === 'GET') return getModelInfo(env, request, url);
 
   // ---- the chat stream ----
   if (path === '/api/chat' && method === 'POST') return chat(env, request);
