@@ -830,16 +830,43 @@ scheme (verified: light-visit → `/app` → still light).
     **Still needs the user to create a Google OAuth client and enable the
     provider** (3 dashboard steps, listed in PROGRESS P2.8). The gate is UX only
     — RLS is the boundary, and P2.1 proved it denies everything.
-11. [ ] Workspaces (cards → app) — *local half done in §2.5; auth + user scoping remain*
-12. [ ] User/workspace scoping on every route
-13. [ ] BYOK (per-user provider + key, stored server-side)
-14. [~] Pricing page + bank-transfer payment claims (no Stripe)
+11. [x] Workspaces (cards → app) — *local half in §2.5; the auth half and
+    user scoping were closed by the Worker port (P3.5, 2026-10-05)*
+12. [x] User/workspace scoping on every route *(P3.5)* — every query is
+    PostgREST called with the caller's own JWT, so `user_id = auth.uid()` does
+    the scoping in the database. The Worker builds no WHERE clause for it: a
+    forgotten filter returns nothing rather than somebody else's rows.
+13. [x] BYOK (per-user provider + key, stored server-side) *(P3.5)* — the key
+    lives on the caller's own `profiles` row, read and written only under
+    their session. This replaced v1's single shared `settings.json`, which on
+    a public host would have let one visitor's key answer another's request.
+14. [x] Pricing page + bank-transfer payment claims (no Stripe)
     — `/pricing` shipped *(P2.9, 2026-10-05)*: three tiers matching
     `platform_settings.plans`, deliberately **static** because `anon` has every
-    table privilege revoked and GitHub Pages has no server to read the row.
-    Remaining: the claim-filing form and the admin approval side *(P2.9b)*.
-15. [ ] Admin dashboard (users, requests, Supabase-limit gauges, claim queue)
-16. [ ] Port `server.js`'s streaming proxy → Supabase Edge Function
+    table privilege revoked and a static host has no server to read the row.
+    `/payment` shipped *(P2.9b, 2026-10-05)*: bank details, the user ID as
+    transfer reference, and an "I have paid" form that inserts a
+    `payment_claims` row as `pending`. The amount is read from `plans` inside
+    the Worker, never taken from the request body — a client that chose its
+    own amount could file a $1 claim against Team.
+15. [x] Admin dashboard *(P2.10, 2026-10-05)* — `/admin` + `/api/admin/*`,
+    gated on `profiles.role = 'admin'` read from the database (never from a
+    client claim). Shows total users, requests today and over the last 365
+    days, per-plan gauges warning at **70 / 85 / 95%** of the pooled daily
+    allowance, and the claim queue. Approving activates the **plan first** and
+    flips the claim second, so a failure can never leave a claim reading
+    "approved" with a user still on Free.
+    *Same item, same day:* the limit those gauges measure became real —
+    `consume_quota()` checks and increments `usage_daily` in one statement and
+    is called only from `POST /api/chat`, so nothing offline costs a request.
+    **Still open inside this item:** Supabase free-tier gauges
+    (`platform_settings.supabase_limits` has `auth_mau`, `egress_mb`,
+    `storage_mb`, `database_mb`, but the *actuals* are not readable through
+    the available tooling — a gauge would be a number we invented).
+16. [x] Port `server.js`'s streaming proxy — **to the Cloudflare Worker, not a
+    Supabase Edge Function** *(P3.5, 2026-10-05; §4 records why the host
+    changed and why the Worker forwards the caller's JWT instead of using a
+    service role key)*
 17. [ ] Migrate existing local data *(pending Q6)*
 
 **P3 — Ship**

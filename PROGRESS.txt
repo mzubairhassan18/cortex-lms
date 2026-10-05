@@ -614,14 +614,81 @@ P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
           silently dropping the param - it has to, because profiles.plan is
           guarded so only an administrator can change it, and the transfer
           still has to be matched first.
-[ ] P2.9b Bank-transfer claim filing UI ("I have paid" form: amount, tier,
-          transfer reference) writing a payment_claims row, plus the admin
-          side that approves it. Depends on P2.10.
-[ ] P2.10 Admin dashboard — users + MAU, AI requests today/month, per-plan
-          usage, Supabase free-tier gauges (warn at 70/85/95%), payment claim
-          queue, bank-details editor.
-[ ] P2.11 Port server.js streaming proxy -> one Supabase Edge Function
-          (Deno), for the GitHub Pages hosting path chosen in P3.1.
+[x] P2.9b 2026-10-05 Bank-transfer payment screen — /payment
+          (public/payment.html + js/payment-page.js), linked from the pricing
+          steps and the footer. Shows platform_settings.bank_details and
+          payment_notice (both read through GET /api/payment, one round trip),
+          lets you pick Pro/Team, paste the transfer reference, and POST
+          /api/payment/claims. Nothing is trusted from the body: tier and
+          reference are validated, the amount comes from plans[tier].price
+          INSIDE the Worker, currency comes from bank_details. One pending
+          claim per tier (409 otherwise) so filing twice does not give the
+          admin two rows for one transfer.
+          Schema, all checked against the live database first:
+            - payment_claims.user_id DEFAULT auth.uid() — it was NOT NULL
+              with no default, so the INSERT failed on the column before RLS
+              ever ran.
+            - "profiles: admin write" — profiles: write own only covered
+              id = auth.uid(), so an admin approving somebody's claim updated
+              ZERO rows and reported success. guard_profile_elevation already
+              allowed admins; RLS was the missing half.
+          Caught before deploy: payment_notice is {title, body}, not a string
+          (it rendered "[object Object]"), and the pricing period key is
+          `period`, not `interval` (the wrong key silently drops the suffix).
+          Live: /payment -> 200; /api/payment and /api/payment/claims -> 401
+          without a session.
+          Also closes Chrome's "Password field is not contained in a form":
+          #set-key now sits in <form style="display: contents"
+          onsubmit="return false">. display:contents is load-bearing —
+          #settings-body is a flex column with an 8px gap and a form that
+          generated a box would collapse every child into one item.
+[x] P2.10 2026-10-05 Admin dashboard, and the daily limit it measures.
+          THE LIMIT FIRST. usage_daily had a "read own or admin" SELECT policy
+          with no INSERT/UPDATE counterpart, so nobody could ever write it —
+          which is why there has never been a row in it. Two policies now
+          scope writes to the caller's own row, and consume_quota() does
+          check-and-increment in ONE statement (ON CONFLICT ... DO UPDATE
+          ... WHERE requests < v_limit): the count cannot pass the limit, and
+          there is no read-then-write window to race. SECURITY INVOKER, so RLS
+          still decides what it may touch. Limits are read from
+          platform_settings.plans — the same row the pricing page reads, so a
+          tier change moves both. A limit of 0 denies rather than grants, so a
+          config mistake cannot become unlimited usage.
+          Called from exactly one place, POST /api/chat, before the stream
+          opens (a refusal has to be an ordinary JSON error, not a half-open
+          event stream). Verified live inside a ROLLED BACK transaction: two
+          calls returned used 1 then 2 / limit 50 / plan free, and
+          usage_daily was left at 0 rows — no phantom counter.
+          Client (stream.js): error bodies are parsed for {"error":...} so a
+          refusal reads as a sentence, and 4xx no longer retries — retrying a
+          quota refusal waits, fails again, and re-runs the quota check.
+          THE DASHBOARD: /admin (admin.html + js/admin-page.js, noindex) with
+          GET /api/admin and POST /api/admin/claims/:id, gated by
+          requireAdmin() reading the caller's OWN profiles row — role from the
+          database, never from a client-controlled claim. Users, requests
+          today, requests over 365 days, per-plan gauges at 70/85/95%, and
+          the claim queue. Team's gauge uses the POOLED allowance (2,000/day
+          shared by 10 seats, so the pool repeats per complete team) —
+          reading req_per_day as per head would show a two-person team with
+          4,000 available when the pricing page says 2,000.
+          Approving activates the PLAN first and flips the CLAIM second: the
+          reverse order is how an admin ends up with a claim reading
+          "approved" while the user stays on Free. Amount and tier come from
+          the stored claim, not the request body.
+          mzubairhassan18@gmail.com promoted to role=admin — possible from SQL
+          only because guard_profile_elevation skips its check when
+          auth.uid() is null.
+          STILL OPEN inside P2.10: the Supabase free-tier gauges.
+          supabase_limits carries auth_mau / egress_mb / storage_mb /
+          database_mb, but the ACTUALS are not readable through the available
+          tooling, and a gauge without an actual is a number we invented.
+[x] P2.11 Port server.js streaming proxy — DONE AS P3.5, and as a Cloudflare
+          Worker rather than a Supabase Edge Function: the host changed to
+          Cloudflare (PLAN §4), so the proxy and the static assets are one
+          deploy, one runtime and one secret surface. The Worker forwards the
+          caller's own Authorization header to PostgREST instead of holding a
+          service role key, which is why no route has to re-check ownership
+          itself. See P3.5 / P3.5b / P3.5c.
 
 P3 — SHIP
 ---------
@@ -660,8 +727,10 @@ P3 — SHIP
           Verified at /cortex-lms/: landing, app, signup, pricing all render with
           0 console errors; /cortex-lms/app -> /cortex-lms/login?next=%2Fapp and
           /cortex-lms/signup reads as signup mode.
-          Still open: the ~20 fetch('/api/...') calls — that is P2.4 + P2.11,
-          not hosting.
+          Still open as of that entry: the ~20 fetch('/api/...') calls — that
+          was P2.4 + P2.11, not hosting. *(Both closed by P3.5 the same day:
+          the Worker serves them, and js/auth.js attaches the session token
+          once rather than at 25 call sites.)*
 [x] P3.2  2026-10-05 Deploy — LIVE, but not the way it was planned. GitHub
           locked Actions on the account ("your account is locked due to a
           billing issue"), so the two workflows written in a7ed08c were
