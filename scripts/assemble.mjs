@@ -21,11 +21,13 @@
  * on the page would go blank. An explicit prefix touches only real URLs.
  *
  * Usage:
- *   node scripts/assemble.mjs          write out/
- *   node scripts/assemble.mjs --serve  write out/, then serve it at the
- *                                      sub-path GitHub Pages would use, so the
- *                                      base-path assumptions can be checked
- *                                      before anything is pushed
+ *   node scripts/assemble.mjs              write out/ at base /cortex-lms/
+ *   node scripts/assemble.mjs --base /     write out/ at the root (Cloudflare
+ *                                          Pages, Netlify — no sub-path)
+ *   node scripts/assemble.mjs --serve      write out/, then serve it at the
+ *                                          configured base so the base-path
+ *                                          assumptions can be checked before
+ *                                          anything is pushed
  */
 
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -37,10 +39,20 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'public');
 const OUT = join(ROOT, 'out');
 
-/* GitHub Pages publishes a project site under /<repo>/. Only --serve cares
- * about this: the output itself must not encode the repository name, or the
- * site breaks the day the repo is renamed. */
-const BASE_PATH = '/cortex-lms/';
+/* The deploy base belongs to the host, not to the code: GitHub Pages serves a
+ * project site under /<repo>/, while Cloudflare Pages and Netlify serve at the
+ * root. Making it a flag rather than a constant means one tree publishes
+ * anywhere without editing this file, and the stamped output keeps no
+ * repository name in it — the site survives a rename of the repo.
+ *
+ *   node scripts/assemble.mjs --base /cortex-lms/   default, GitHub Pages
+ *   node scripts/assemble.mjs --base /              root deploy */
+const BASE_PATH = (() => {
+  const i = process.argv.indexOf('--base');
+  const raw = i === -1 || !process.argv[i + 1] ? '/cortex-lms/' : process.argv[i + 1];
+  const p = raw.startsWith('/') ? raw : `/${raw}`;
+  return p.endsWith('/') ? p : `${p}/`;
+})();
 const PORT = 4173;
 
 /* [source document, route directory] — the route directory is what server.js

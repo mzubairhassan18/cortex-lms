@@ -1,0 +1,27 @@
+{
+  // Cloudflare Workers Static Assets — the host for the assembled site.
+  //
+  // Cloudflare's own guidance: "If you are starting a new project, use Workers
+  // instead of Pages." Pages still works, but it now delegates to Workers and
+  // the delegation failed on first contact here (`wrangler pages project
+  // create` -> "Missing entry-point to Worker script or to assets directory").
+  //
+  // Purely static for now: no `main`, because assets.directory alone is enough.
+  // When the 25 `fetch('/api/...')` call sites get a home, this file gains a
+  // `main` plus the ASSETS binding, and the same deploy serves both the files
+  // and the API — see PLAN.md section 4.
+  //
+  // `directory` points at the assembled output, which is built with a root
+  // base for this host:
+  //
+  //   node scripts/assemble.mjs --base /     <- root, because *.workers.dev
+  //   node scripts/assemble.mjs              <- /cortex-lms/, for GitHub Pages
+  //
+  // Cloudflare uploads what is on disk; it does not build. So assemble first,
+  // then `wrangler deploy`.
+  "name": "cortex",
+  "compatibility_date": "2026-10-05",
+  "assets": {
+    "directory": "./out"
+  }
+}

@@ -622,7 +622,7 @@ owner is exempt, and the owner can already `alter table` anything.
 
 ---
 
-## 4. G9 — Hosting — **DECIDED 2026-10-04: GitHub Pages + Supabase Edge Function**
+## 4. G9 — Hosting — **DECIDED 2026-10-04; STATIC HOST CHANGED 2026-10-05 → Cloudflare Workers Static Assets**
 
 User chose option A below (2026-10-04), tiers and storage as proposed.
 
@@ -680,10 +680,36 @@ folder directly: no job, no runner, no minutes, nothing for the lock to block.
 Public URL unchanged: `https://mzubairhassan18.github.io/cortex-lms/`. Restore
 Actions from `a7ed08c` and retire `docs/` whenever billing clears.
 
-**Hosting's remaining work is blocker 1 (the Edge Function) and, once Actions
-is usable again, the heartbeat cron — also restorable from `a7ed08c`.** Until
-then the project's own authenticated use stands in for the heartbeat. Local
-development is unaffected either way.
+**STATIC HOST CHANGED 2026-10-05 → Cloudflare Workers Static Assets.**
+GitHub Pages was dropped for a reason the user hit directly in the browser: it
+is a static host that answers every `POST` with 405 and every unknown path
+with an HTML 404, so all 25 `fetch('/api/...')` call sites fail there, and the
+HTML error page is what breaks `JSON.parse` on the response. No amount of
+host-hopping fixes that — it needs an API.
+
+Cloudflare for a reason of its own: their docs say *"If you are starting a new
+project, use Workers instead of Pages. Pages continues to work, but new
+features and optimizations are focused on Workers"*, and `wrangler pages
+project create` demonstrates it by delegating to Workers and failing with
+*"Missing entry-point to Worker script or to assets directory"*.
+
+Deployed from `wrangler.jsonc` with `assets.directory = ./out` and **no Worker
+script yet**:
+
+    https://cortex.mzubairhassan18.workers.dev
+      10/10 routes 200 · 0 console errors · gate → /login?next=%2Fapp · CF cache HIT
+
+`scripts/assemble.mjs` gained `--base`, because the deploy base belongs to the
+host and not to the code: `--base /` for root hosts (Cloudflare, Netlify),
+default `/cortex-lms/` for GitHub Pages, which stays up as a mirror. Adding a
+`main` plus the `ASSETS` binding to `wrangler.jsonc` is what turns this into
+static **and** API from a single deploy — that is where the 25 call sites go.
+
+**Hosting's remaining work is blocker 1 (the API — either that Worker `main`
+or the Supabase Edge Function) and, once Actions is usable again, the
+heartbeat cron — also restorable from `a7ed08c`.** Until then the project's own
+authenticated use stands in for the heartbeat. Local development is unaffected
+either way.
 
 ---
 

@@ -691,6 +691,33 @@ P3 — SHIP
           the admit path and Google OAuth are for the user to confirm in
           their own Chrome — plus the Supabase Site URL / redirect allow-list
           for this origin, which has no MCP tool and cannot be read back.
+[x] P3.4  2026-10-05 Static host moved to CLOUDFLARE WORKERS STATIC ASSETS —
+          https://cortex.mzubairhassan18.workers.dev — deployed, 10/10 routes
+          200, 0 console errors, gate -> /login?next=%2Fapp, CF cache HIT.
+          Trigger was the user's console: every fetch('/api/...') returned
+          404 on GET and 405 on POST (GitHub Pages answers POST with 405) and
+          GitHub's HTML error page is what broke JSON.parse. That is not a
+          hosting bug, it is a missing API — but it made GitHub Pages the
+          wrong host regardless.
+          Cloudflare chosen on their own guidance ("use Workers instead of
+          Pages... new features are focused on Workers"); `wrangler pages
+          project create` confirmed it by delegating to Workers and failing
+          with "Missing entry-point to Worker script or to assets directory".
+          So: wrangler.jsonc with assets.directory=./out, NO Worker script
+          yet. Wrangler 4.147 installed, OAuth'd as mzubairhassan18@gmail.com
+          (account cfea947a3be727f7334acef2dcb7e7e5, pages+workers write).
+          scripts/assemble.mjs gained --base: the deploy base is a property of
+          the host, not the code. `--base /` for root hosts, default
+          /cortex-lms/ for GitHub Pages, which stays up as a mirror.
+          Also done this session: official Cloudflare agent-setup executed -
+          5 MCP servers registered in opencode.jsonc (backed up first),
+          cloudflare-docs connected (public, no auth); the 4 OAuth servers
+          still need `opencode mcp auth` and the opencode CLI is not on PATH;
+          skills install killed twice by server restarts (agents-sdk, basin
+          landed). cf CLI declined by the user - Wrangler is enough.
+          OPEN: the Supabase redirect allow-list must now contain
+          https://cortex.mzubairhassan18.workers.dev/** or Google sign-in
+          dies on this host, and it cannot be read or written by any MCP tool.
 
 OPEN QUESTIONS (see PLAN.md section 7)
 --------------------------------------
