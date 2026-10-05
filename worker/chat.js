@@ -23,6 +23,7 @@
  */
 
 import { HttpError, userId } from './supabase.js';
+import { consumeQuota } from './quota.js';
 import {
   FIRST_BYTE_MS,
   IDLE_MS,
@@ -59,6 +60,17 @@ export async function chat(env, request) {
   // an ordinary JSON error, not as a half-open event stream.
   const s = await loadSettings(env, request);
   const uid = userId(request);
+
+  /*
+   * Quota BEFORE the stream opens, for the same reason loadSettings runs
+   * above: a refusal has to arrive as an ordinary JSON error the client can
+   * show as one sentence, not as a half-open event stream it then has to
+   * tear down. The counter is incremented by the database in the same
+   * statement that checks it, so a message that never sends has not spent
+   * one either.
+   */
+  await consumeQuota(env, request, typeof body?.kind === 'string' ? body.kind : 'chat');
+
   const conf = providerConf(s);
   const isAuto = conf.p.kind === 'auto';
 

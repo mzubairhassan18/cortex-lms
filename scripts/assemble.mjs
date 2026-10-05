@@ -66,6 +66,7 @@ const ROUTES = [
   ['auth.html',    'signup'],     // /signup      /  two routes
   ['pricing.html', 'pricing'],    // /pricing
   ['payment.html', 'payment'],    // /payment — bank transfer + claim filing
+  ['admin.html',   'admin'],      // /admin   — gated on profiles.role=admin
 ];
 
 const MIME = {

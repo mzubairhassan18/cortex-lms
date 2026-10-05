@@ -36,6 +36,7 @@ import { connect, getModels, getSettings, putSettings } from './settings.js';
 import { getModelInfo } from './model-info.js';
 import { chat } from './chat.js';
 import { createClaim, paymentInfo } from './payment.js';
+import { adminOverview, reviewClaim } from './admin.js';
 
 export default {
   async fetch(request, env) {
@@ -108,6 +109,15 @@ async function route(request, env, url) {
   if (path === '/api/payment' && method === 'GET') return paymentInfo(env, request);
   if (path === '/api/payment/claims' && method === 'POST') {
     return createClaim(env, request, await read(request));
+  }
+
+  // ---- admin dashboard (P2.10) ----
+  if (root === 'admin') {
+    if (path === '/api/admin' && method === 'GET') return adminOverview(env, request);
+    if (seg.length === 4 && seg[2] === 'claims' && method === 'POST') {
+      return reviewClaim(env, request, seg[3], await read(request));
+    }
+    throw new HttpError(405, 'Method not allowed');
   }
 
   // ---- the library ----
