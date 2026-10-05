@@ -125,7 +125,10 @@ googleBtn.addEventListener('click', () => {
   client.auth
     .signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: location.origin + next },
+      // at(next), not next: location.origin only carries the host, so a raw
+      // '/app' would send GoTrue back to github.io/app and 404 off the
+      // sub-path. The allow-list has to contain the full returned URL.
+      options: { redirectTo: location.origin + at(next) },
     })
     .then(({ error }) => {
       if (error) {
@@ -155,7 +158,7 @@ form.addEventListener('submit', async (e) => {
     email,
     options: {
       // Same destination as the OAuth return, so both paths land on `next`.
-      emailRedirectTo: location.origin + next,
+      emailRedirectTo: location.origin + at(next),
     },
   });
 
