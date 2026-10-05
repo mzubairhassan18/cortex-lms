@@ -35,6 +35,7 @@ import {
 import { connect, getModels, getSettings, putSettings } from './settings.js';
 import { getModelInfo } from './model-info.js';
 import { chat } from './chat.js';
+import { createClaim, paymentInfo } from './payment.js';
 
 export default {
   async fetch(request, env) {
@@ -102,6 +103,12 @@ async function route(request, env, url) {
 
   // ---- the chat stream ----
   if (path === '/api/chat' && method === 'POST') return chat(env, request);
+
+  // ---- bank transfer (P2.9b) ----
+  if (path === '/api/payment' && method === 'GET') return paymentInfo(env, request);
+  if (path === '/api/payment/claims' && method === 'POST') {
+    return createClaim(env, request, await read(request));
+  }
 
   // ---- the library ----
   // v1 kept uploads on the laptop's disk, so nothing has ever been stored

@@ -65,6 +65,7 @@ const ROUTES = [
   ['auth.html',    'login'],      // /login       \  one document,
   ['auth.html',    'signup'],     // /signup      /  two routes
   ['pricing.html', 'pricing'],    // /pricing
+  ['payment.html', 'payment'],    // /payment — bank transfer + claim filing
 ];
 
 const MIME = {
