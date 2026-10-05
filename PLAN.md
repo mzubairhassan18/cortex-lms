@@ -652,18 +652,37 @@ User chose option A below (2026-10-04), tiers and storage as proposed.
    `app/`, `workspaces/`, `login/`, `signup/`, `pricing/` folders and a
    `.nojekyll`.
 
-**The publish flow is `node scripts/assemble.mjs` → deploy `out/`** (gitignored).
-It is deliberately *not* a build step: nothing is transpiled or bundled, and
-`node server.js` never runs it. `--serve` replays `out/` at `/cortex-lms/` on
-:4173 and **404s outside the base exactly as Pages would** — an earlier version
-of that preview was more permissive than production and hid a real bug.
+**The publish flow is `node scripts/assemble.mjs` → `out/` → copy to `docs/` →
+push.** `out/` stays gitignored; `docs/` is its copy and *is* committed, because
+on this host the publisher is the git push itself. The assembler is deliberately
+*not* a build step: nothing is transpiled or bundled, and `node server.js` never
+runs it. `--serve` replays `out/` at `/cortex-lms/` on :4173 and **404s outside
+the base exactly as Pages would** — an earlier version of that preview was more
+permissive than production and hid a real bug.
 
 **Trap that must be handled on deploy:** Supabase Free projects **pause after
-1 week of inactivity** — DB, Auth *and* Storage all sleep. A GitHub Actions
-cron pinging the project every 5 days is therefore not optional.
+1 week of inactivity** — DB, Auth *and* Storage all sleep. A cron pinging the
+project every 5 days is therefore not optional.
 
-**Hosting's remaining work is blocker 1 (the Edge Function), the Actions
-heartbeat above, and an Actions workflow that runs the assemble step.** Local
+**PUBLISHING CHANGED 2026-10-05 — GitHub locked Actions on this account.** The
+run failed with *"The job was not started because your account is locked due to
+a billing issue"*, and the API pinned down exactly what that covers: reads are
+200, every Actions **write** is 404 (`PATCH workflow`, `DELETE run attempt`),
+while `POST /pages` succeeded — so Actions specifically is blocked, not the
+token (`gist, repo, workflow`) and not the repository. Nothing was billed: the
+one run attempted never received a runner at all (`steps: []`, `runner_id: 0`,
+6 s) and consumed **0 minutes**, and a public repository does not bill Actions
+minutes in the first place. The two workflows written in `a7ed08c` were removed
+in `390606f` so that nothing can be scheduled while the account is in that
+state, and the site now publishes from the **legacy Pages source** —
+`build_type=legacy`, branch `main`, path `docs/` (`3df4cef`). GitHub serves that
+folder directly: no job, no runner, no minutes, nothing for the lock to block.
+Public URL unchanged: `https://mzubairhassan18.github.io/cortex-lms/`. Restore
+Actions from `a7ed08c` and retire `docs/` whenever billing clears.
+
+**Hosting's remaining work is blocker 1 (the Edge Function) and, once Actions
+is usable again, the heartbeat cron — also restorable from `a7ed08c`.** Until
+then the project's own authenticated use stands in for the heartbeat. Local
 development is unaffected either way.
 
 ---

@@ -662,9 +662,35 @@ P3 — SHIP
           /cortex-lms/signup reads as signup mode.
           Still open: the ~20 fetch('/api/...') calls — that is P2.4 + P2.11,
           not hosting.
-[ ] P3.2  Deploy + smoke test (Actions workflow that runs assemble, heartbeat
-          cron)
-[ ] P3.3  Public URL
+[x] P3.2  2026-10-05 Deploy — LIVE, but not the way it was planned. GitHub
+          locked Actions on the account ("your account is locked due to a
+          billing issue"), so the two workflows written in a7ed08c were
+          removed again in 390606f before anything could be scheduled.
+          Evidence that the feature, not us, is what is blocked: reads 200,
+          Actions writes 404 (PATCH workflow, DELETE run attempt) while
+          POST /pages 200; the single attempted run never received a runner
+          (steps [], runner_id 0, 6s) and consumed 0 minutes — and a public
+          repo does not bill Actions minutes at all. Workaround needing no
+          billing: legacy Pages source, build_type=legacy, branch main, path
+          docs/ (3df4cef). GitHub serves the folder directly — no job, no
+          runner, no minutes, nothing to lock. docs/ is assemble's output
+          committed on purpose (55 files, 800 KB): here the publish step IS
+          the push. Consequence: publish is manual from now on — regenerate
+          docs/ after every change to public/ — and the heartbeat is gone
+          until Actions returns, so the user's own authenticated activity is
+          what keeps Supabase awake meanwhile.
+[x] P3.3  2026-10-05 Public URL https://mzubairhassan18.github.io/cortex-lms/
+          — verified live: /, /app, /pricing, /login, /signup, /workspaces,
+          /js/base.js, /app/index.html all 200. In a real browser: 0 console
+          errors on landing and login, all five assets 200, the base stamps
+          correctly (links come out /cortex-lms/login, never /login), the
+          gate's reject path works in production (/cortex-lms/app ->
+          /cortex-lms/login/?next=%2Fapp), and Supabase answers the
+          production origin (OPTIONS + GET /auth/v1/settings both 200) so
+          CORS is not an obstacle. STILL OPEN: no session in my browser, so
+          the admit path and Google OAuth are for the user to confirm in
+          their own Chrome — plus the Supabase Site URL / redirect allow-list
+          for this origin, which has no MCP tool and cannot be read back.
 
 OPEN QUESTIONS (see PLAN.md section 7)
 --------------------------------------
