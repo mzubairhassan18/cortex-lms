@@ -880,6 +880,15 @@ scheme (verified: light-visit → `/app` → still light).
     (`platform_settings.supabase_limits` has `auth_mau`, `egress_mb`,
     `storage_mb`, `database_mb`, but the *actuals* are not readable through
     the available tooling — a gauge would be a number we invented).
+    *Added later, same item (P2.13, 2026-10-05):* the route existed but
+    nothing linked to it, so there was no way to *find* `/admin`. The settings
+    panel now ends in an account menu — account name, Pricing, Admin, Sign
+    out — which also closed two older gaps: the app had no link to `/pricing`
+    at all, and `signOut()` had been exported since the gate shipped with a
+    comment saying it was for a sign-out control that was never built. The
+    Admin link is hidden unless `/api/settings` reports `role = 'admin'`, and
+    fail-closed; it is UI only, since `/api/admin` re-reads role from the
+    database. There is still no admin username/password — there never was one.
 16. [x] Port `server.js`'s streaming proxy — **to the Cloudflare Worker, not a
     Supabase Edge Function** *(P3.5, 2026-10-05; §4 records why the host
     changed and why the Worker forwards the caller's JWT instead of using a

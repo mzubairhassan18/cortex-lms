@@ -52,12 +52,25 @@ export const DEFAULT_SETTINGS = { provider: 'auto', apiKey: '', baseUrl: '', key
 // Which provider an unusable/missing saved setting falls back to.
 export const FALLBACK_PROVIDER = 'auto';
 
-/** The settings row as /api/settings describes it. */
+/**
+ * The settings row as /api/settings describes it.
+ *
+ * Every caller builds `s` through loadSettings(), so the account fields below
+ * are present on the boot response AND on the connect/PUT responses — which
+ * matters, because the client replaces its whole settings object from those
+ * and would otherwise forget who is signed in the moment a provider connects.
+ */
 export function settingsView(s) {
   return {
     provider: PROVIDERS[s.provider] ? s.provider : FALLBACK_PROVIDER,
     baseUrl: s.baseUrl || '',
     apiKeySet: !!s.apiKey,
+    /* Identity for the settings panel's account menu. Reading your own role
+     * is allowed by the profiles read policy and grants nothing: the Admin
+     * link is UI, and /api/admin re-reads role from the database anyway. */
+    role: s.role || '',
+    email: s.email || '',
+    name: s.name || '',
     providers: Object.entries(PROVIDERS).map(([id, p]) => ({
       id,
       label: p.label,

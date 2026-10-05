@@ -1,5 +1,6 @@
 /* settings.js — split from public/app.js (app.js line 1921-2150). */
 import { escapeHtml } from './markdown.js';
+import { signOut } from './auth.js';
 import { $, footerInfo, footerModel, input, modelSelect, setBase, setConnect, setKey, setMessage, setProvider, settingsStatus, state } from './state.js';
 
 /* ================= Models & provider settings ================= */
@@ -42,7 +43,26 @@ export function renderSettingsForm() {
   setBase.value = appSettings.baseUrl || activeMeta.defaultBaseUrl || '';
   delete setBase.dataset.touched;
   syncProviderFields();
+  renderAccount();
 }
+
+/*
+ * The account menu under the form. Identity arrives on /api/settings — the one
+ * request the boot already makes — so the panel never has to fetch anything to
+ * know whose account this is or whether the Admin link should exist. Missing
+ * values simply leave the link hidden: an unknown role is treated as "not an
+ * admin", which is the only safe default.
+ */
+function renderAccount() {
+  const who = $('set-who');
+  if (who) who.textContent = appSettings.email || appSettings.name || '';
+  const admin = $('set-admin');
+  if (admin) admin.hidden = appSettings.role !== 'admin';
+}
+
+/* Wired once at module load; the button lives in the static markup. */
+const signOutBtn = $('set-signout');
+if (signOutBtn) signOutBtn.addEventListener('click', () => signOut());
 
 export function syncProviderFields() {
   const meta = providerMeta(setProvider.value);

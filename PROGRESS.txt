@@ -10,7 +10,7 @@ Convention:
   [x] done  (YYYY-MM-DD) + NOTE
   [!] blocked + NOTE
 
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 
 BASELINE
@@ -751,6 +751,51 @@ P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
           needs a real session, and pdf/docx extraction needs a real browser —
           both are the user's to run in their own Chrome. Live version
           718366b2.
+
+[x] P2.13 2026-10-05 Account menu in Settings — /admin was reachable only by
+           typing the URL, and it was not alone: there was no link to /pricing
+           either and NO SIGN-OUT BUTTON anywhere, even though auth.js has
+           exported signOut() since the gate shipped (its own comment says
+           "For the sign-out control" — written for a control nobody added).
+           Answer to "is there an admin side with a fixed username/password":
+           no, there is no credential system for admin at all. Access IS
+           profiles.role='admin' on the caller's own row, read by requireAdmin()
+           from their OWN JWT, and re-checked by the database through is_admin()
+           in the RLS policies; requireSession('/admin') is a UX bounce only.
+           Nothing in the Worker hardcodes a password — the only key handling
+           there is BYOK for LLM providers. The account was already the admin,
+           so the gap was purely discoverability.
+           THE MENU: a footer inside #settings-body — email/display name, a
+           Pricing link, an Admin link and Sign out. The Admin link is
+           server-rendered hidden and only un-hidden when /api/settings reports
+           role=admin, so it never appears for anyone else. It is UI only: an
+           admin-only link buys a visitor nothing, because /api/admin reads role
+           from the database on every request.
+           IDENTITY PIGGYBACKS ON /api/settings instead of a new endpoint. That
+           is the one request boot already makes (main.js: requireSession then
+           loadSettings), so opening Settings costs no second round trip and no
+           spinner. COLS and fromProfile gained role/email/display_name, and
+           settingsView emits them — deliberately there rather than only in
+           getSettings, because the client REPLACES its whole settings object
+           from the connect and PUT responses too, and would otherwise forget
+           who is signed in the moment a provider connects. All three callers
+           build s through loadSettings(), so identity is on every path.
+           toProfile() still writes an explicit four-field list, so none of it
+           can ever be written back to the table (which would also trip the
+           admin-only with_check on profiles).
+           Fail-closed on purpose: a missing or unreadable role leaves the link
+           hidden rather than showing it to the wrong person.
+           VERIFIED: the three edited files parse as ESM; settingsView unit-
+           tested from node both with identity (role/email/name all present) and
+           without (all three empty); authenticated holds SELECT on role, email
+           and display_name (column grants checked — a restricted grant would
+           have made PostgREST 400 and broken boot); every column in COLS
+           confirmed to exist; 8/8 routes 200; the served /app/ contains
+           set-account with href="/admin" and href="/pricing" and no stray "./";
+           .set-account/.set-links present in the served CSS; /api/settings
+           still 401 unauthenticated. NOT TESTED HERE: the authenticated
+           response showing role=admin, and clicking through to /admin — the
+           user's to run in their own Chrome. Worker version 340f054e.
 
 P3 — SHIP
 ---------

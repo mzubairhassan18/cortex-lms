@@ -26,13 +26,21 @@ import {
   pickAutoModel,
 } from './providers.js';
 
-const COLS = 'provider,api_key,base_url,provider_keys';
+/* role / email / display_name ride along with the provider fields: this is
+ * the one call the app makes at boot, so the settings panel can tell whose
+ * account it is — and whether to show the Admin link — without a second
+ * request. They are read-only here; toProfile() writes an explicit list and
+ * never sends them back to the table. */
+const COLS = 'provider,api_key,base_url,provider_keys,role,email,display_name';
 
 const fromProfile = (p) => ({
   provider: p.provider || DEFAULT_SETTINGS.provider,
   apiKey: p.api_key || '',
   baseUrl: p.base_url || '',
   keys: p.provider_keys || {},
+  role: p.role || '',
+  email: p.email || '',
+  name: p.display_name || '',
 });
 
 const toProfile = (s) => ({
