@@ -1,5 +1,6 @@
 /* files.js — split from public/app.js (app.js line 1608-1761). */
 import { createConversation } from './chat.js';
+import { extractFileText } from './extract.js';
 import { escapeHtml } from './markdown.js';
 import { showToast } from './selection.js';
 import { $, attachBtn, attachChips, fileInput, inputForm, linkBtn, state } from './state.js';
@@ -38,13 +39,17 @@ attachChips.addEventListener('click', (e) => {
   if (x) removeFile(x.dataset.fid);
 });
 
-export function readFileB64(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result).split(',')[1] || '');
-    r.onerror = () => reject(new Error(`Could not read ${file.name}`));
-    r.readAsDataURL(file);
-  });
+/** ArrayBuffer -> base64, the body the upload route expects.
+ *  Chunked through String.fromCharCode so a 12 MB file never builds a single
+ *  16 MB argument list — apply() is bounded by the engine's stack. */
+export function toB64(buf) {
+  const bytes = new Uint8Array(buf);
+  const CHUNK = 0x8000;
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
 }
 
 export async function uploadFiles(fileList) {
@@ -53,11 +58,20 @@ export async function uploadFiles(fileList) {
   if (!state.currentId) await createConversation();
   for (const file of files) {
     try {
-      const data = await readFileB64(file);
+      // Read once: the extractor and the base64 body want the same bytes, and
+      // a multi-MB file is not worth reading from disk twice.
+      const buf = await file.arrayBuffer();
+      showToast(`📎 Reading ${escapeHtml(file.name)}…`);
+      const text = await extractFileText(buf, file.name);
       const res = await fetch(`/api/conversations/${state.currentId}/files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: file.name, data }),
+        body: JSON.stringify({
+          name: file.name,
+          data: toB64(buf),
+          text,
+          mime: file.type || '',
+        }),
       });
       const out = await res.json();
       if (!res.ok) throw new Error(out.error || 'Upload failed');
