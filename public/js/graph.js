@@ -22,10 +22,11 @@
  */
 import { childrenIndex, panelEl } from './explain-system.js';
 import { confirmCloseExplain } from './explain-lifecycle.js';
+import { createConversation } from './chat.js';
 import { deleteConversation, selectConversation } from './conversations.js';
 import { showSidebar, updateCollapsed } from './explain-ui.js';
 import { attachExplainHandlers } from './interactions.js';
-import { $, explainPanels, state } from './state.js';
+import { $, explainPanels, input, state } from './state.js';
 import { makeSelectionHandlers } from './selection.js';
 import { hideMenu, showMenu } from './graph-menu.js';
 /* The wheel and pinch recognisers for the canvas. Kept deliberately small: this
@@ -48,6 +49,8 @@ const railLayout = $('rail-layout');
 const railZoomIn = $('rail-zoom-in');
 const railZoomOut = $('rail-zoom-out');
 const railZoomLabel = $('rail-zoom-label');
+const graphSearchQ = $('graph-search-q');
+const graphSearchNote = $('graph-search-note');
 
 const mainRow = $('main-row');
 const resizeHandle = $('resize-handle');
@@ -831,6 +834,7 @@ function applyCamera() {
 /* Zoom around a point of the viewport so what you are looking at stays put.
  * cx/cy default to the centre of the viewport. */
 function setZoom(next, cx, cy) {
+  cancelFly();                 // zoom and a fly-to would fight over the camera
   next = clampZoom(next);
   if (next === zoom) return;
   const ax = cx == null ? graphScroll.clientWidth / 2 : cx;
@@ -918,6 +922,7 @@ function canPanFrom(e) {
 }
 
 function onPointerDown(e) {
+  cancelFly();                 // the user has taken the board back mid-flight
   if (!canPanFrom(e)) return;
   /*
    * Touch used to ride on the board's native scroll, and #graph-scroll is
@@ -1036,6 +1041,208 @@ function onKeyUp(e) {
   graphScroll.classList.remove('can-pan');
 }
 
+/* ---------------- search: find the text, then fly to it ---------------- */
+
+/*
+ * Two jobs, deliberately split:
+ *
+ *   /api/search   "which conversations hold this?" -> ids only. That answer
+ *                 needs the database (jsonb has no substring operator), and
+ *                 the message bodies never have to leave it.
+ *   this file     "where is that on the board?" -> switch, reveal, centre.
+ *
+ * The second job can only happen here: nodeEls, the open/collapsed sets and
+ * the camera are all private to this module, and an id on its own says nothing
+ * about where the box will land.
+ */
+
+let hits = [];          // conversation ids holding the phrase, best first
+let hitIdx = -1;
+let searchTimer = 0;
+let searchSeq = 0;      // an out-of-order reply must never win the race
+let foldHold = 0;       // >0 while a search owns the board — see foldOutOfView
+let flyRaf = 0;
+let flyDone = null;
+
+const setSearchNote = (s) => { if (graphSearchNote) graphSearchNote.textContent = s; };
+
+function cancelFly() {
+  if (flyRaf) cancelAnimationFrame(flyRaf);
+  flyRaf = 0;
+  if (flyDone) { const done = flyDone; flyDone = null; done(false); }
+}
+
+/*
+ * Pan the camera so a WORLD point lands on the centre of the viewport.
+ *
+ * The motion is a lerp between where the board is now and where it has to be,
+ * which is the "comes in from whatever direction it was" asked for. And
+ * because only the CAMERA moves — never a node — the conversation, its
+ * explanation tree, its summary and every edge between them travel as one
+ * board, so nothing can drift apart on the way.
+ */
+function flyTo(wx, wy, dur = 560) {
+  cancelFly();
+  const sx = camX;
+  const sy = camY;
+  const dx = Math.round(graphScroll.clientWidth / 2 - wx * zoom) - sx;
+  const dy = Math.round(graphScroll.clientHeight / 2 - wy * zoom) - sy;
+  camTouched = true;              // the framing is ours now: no render re-centres it
+  if (!dx && !dy) return Promise.resolve(true);
+  const t0 = performance.now();
+  const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  return new Promise((resolve) => {
+    flyDone = resolve;
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / dur);
+      const e = ease(k);
+      camX = Math.round(sx + dx * e);
+      camY = Math.round(sy + dy * e);
+      applyCamera();
+      if (k < 1) { flyRaf = requestAnimationFrame(step); return; }
+      flyRaf = 0;
+      flyDone = null;
+      resolve(true);
+    };
+    flyRaf = requestAnimationFrame(step);
+  });
+}
+
+/* render() is scheduled, not synchronous — poll a few frames for the box. */
+async function waitNode(key) {
+  for (let i = 0; i < 24; i++) {
+    const el = nodeEls.get(key);
+    if (el) return el;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return null;
+}
+
+/* What a message or an explain reply actually says. `content` is a string in
+ * this app, but the shape has been an array of parts before and costs one
+ * branch to keep working if it is again. */
+const bodyText = (m) => {
+  const c = typeof m === 'string' ? m : m && m.content;
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) return c.map((p) => (typeof p === 'string' ? p : (p && p.text) || '')).join(' ');
+  return c == null ? '' : String(c);
+};
+
+/*
+ * Which explanation holds the phrase. Only the ACTIVE conversation's explain
+ * windows are ever loaded into state, so this is meaningful only after
+ * centerOn() has switched to the conversation the database named.
+ */
+function explainWith(q) {
+  if (!q || !state.explains || !state.explains.nodes) return null;
+  for (const [nid, n] of Object.entries(state.explains.nodes)) {
+    if (n.selection && String(n.selection).toLowerCase().includes(q)) return nid;
+    if ((n.messages || []).some((m) => bodyText(m).toLowerCase().includes(q))) return nid;
+  }
+  return null;
+}
+
+/*
+ * Put one conversation at the exact centre of the viewport.
+ * 'ok' | 'none' | 'busy' | 'cancelled'
+ */
+async function centerOn(id) {
+  foldHold++;                    // hold foldOutOfView off until we land
+  try {
+    const keepFocus = !!(graphSearchQ && document.activeElement === graphSearchQ);
+    collapsedConvs.delete(id);   // the jump target is never folded shut
+    if (id !== state.currentId) {
+      // selectConversation() early-returns while streaming, which would leave
+      // us cheerfully centring the WRONG box — say so instead.
+      if (state.streaming) return 'busy';
+      await selectConversation(id);
+      // ...and it finishes by focusing the chat input, which would throw the
+      // caret out of the search box halfway through typing.
+      if (keepFocus && graphSearchQ) graphSearchQ.focus();
+    }
+    const exp = explainWith((graphSearchQ ? graphSearchQ.value : '').trim().toLowerCase());
+    if (exp) reveal(exp);        // opens the node AND schedules a render
+    else schedule();
+
+    const el = await waitNode(exp ? 'e:' + exp : 'c:' + id);
+    if (!el) return 'none';
+    const x = parseFloat(el.style.left) || 0;
+    const y = parseFloat(el.style.top) || 0;
+    const w = parseFloat(el.style.width) || 0;
+    const h = parseFloat(el.style.height) || 0;
+    const got = await flyTo(x + w / 2, y + h / 2);
+    return got ? 'ok' : 'cancelled';
+  } finally {
+    foldHold = Math.max(0, foldHold - 1);
+    foldOutOfView();             // now fold whatever is genuinely out of view
+  }
+}
+
+async function gotoHit(i, seq) {
+  if (!hits.length || (seq != null && seq !== searchSeq)) return;
+  hitIdx = ((i % hits.length) + hits.length) % hits.length;
+  const out = await centerOn(hits[hitIdx]);
+  if (seq != null && seq !== searchSeq) return;  // superseded mid-flight
+  if (out === 'cancelled') return;               // the user grabbed the board
+  setSearchNote(
+    out === 'ok' ? `${hitIdx + 1} / ${hits.length}`
+      : out === 'busy' ? 'Sending — try again'
+        : 'Not on the board',
+  );
+}
+
+async function runSearch() {
+  const seq = ++searchSeq;
+  cancelFly();                                 // an older flight must not land later
+  hits = [];
+  hitIdx = -1;
+  const q = (graphSearchQ ? graphSearchQ.value : '').trim();
+  if (!q) { setSearchNote(''); return; }
+  setSearchNote('…');
+  try {
+    const ws = state.workspaceId ? `&workspace=${encodeURIComponent(state.workspaceId)}` : '';
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}${ws}`);
+    const data = await res.json().catch(() => ({}));
+    if (seq !== searchSeq) return;             // a newer keystroke already won
+    if (!res.ok) throw new Error(data.error || 'Search failed.');
+    hits = Array.isArray(data.ids) ? data.ids : [];
+  } catch (e) {
+    if (seq === searchSeq) setSearchNote((e && e.message) || 'Search failed.');
+    return;
+  }
+  if (!hits.length) { setSearchNote('No matches'); return; }
+  await gotoHit(0, seq);
+}
+
+function clearSearch() {
+  clearTimeout(searchTimer);
+  searchSeq++;
+  cancelFly();
+  hits = [];
+  hitIdx = -1;
+  if (graphSearchQ) graphSearchQ.value = '';
+  setSearchNote('');
+}
+
+function initSearch() {
+  if (!graphSearchQ) return;
+  graphSearchQ.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 220);
+  });
+  graphSearchQ.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // Enter before the debounce fires is "I meant it" — run it now, and
+      // otherwise walk the hits (Shift+Enter walks backwards).
+      if (!hits.length) { runSearch(); return; }
+      gotoHit(hitIdx + (e.shiftKey ? -1 : 1), searchSeq);
+      return;
+    }
+    if (e.key === 'Escape') { e.preventDefault(); clearSearch(); }
+  });
+}
+
 /* ---------------- render ---------------- */
 
 /* ---------------- Free mode: dragging a conversation ---------------- */
@@ -1133,8 +1340,71 @@ function endNodeDrag() {
 
 /* ---------------- right-click ---------------- */
 
+/*
+ * Client (screen) pixels -> world coordinates on the board.
+ *
+ * #graph-canvas carries `translate(camX, camY) scale(zoom)` with
+ * transform-origin: 0 0, so its OWN bounding rect starts at world (0,0) and is
+ * already scaled. Reading the rect instead of rebuilding it from camX means
+ * there is one number to invert rather than two to add up, and it stays right
+ * whatever offset the canvas sits at inside the scroll box.
+ */
+function worldPoint(clientX, clientY) {
+  const r = graphCanvas.getBoundingClientRect();
+  return { x: (clientX - r.left) / zoom, y: (clientY - r.top) / zoom };
+}
+
+/*
+ * "Create conversation" from the board lands the new conversation where you
+ * right-clicked — not where the computed column would have put it.
+ *
+ * Without this it has no saved coordinate, so in Free mode it falls through to
+ * the aligned stack: a fixed place on the left of the board, which by the time
+ * the user has dragged things around is a place where something else probably
+ * already sits. That is the complaint — it appeared ON TOP of other
+ * conversations, nowhere near where they asked for it.
+ *
+ * Centred on the click was tried and rejected: the new conversation becomes the
+ * active one, so sizeOf() reads it as expanded (780x660), and centring a box
+ * that size puts half of it UP and LEFT of the cursor — back over whatever the
+ * user just made room by panning away from. Anchoring the node's top-left AT
+ * the click is both the literal reading of "positioned where the click
+ * happened" (position IS left/top here) and the one that can only grow outward
+ * into space you already cleared.
+ *
+ * Aligned mode is deliberately untouched: it computes every position itself, so
+ * a saved coordinate would just be ignored. The board menu offers "Switch to
+ * Free" for that case.
+ */
+function placeAtClick(id, at) {
+  if (!isFree() || !at) return;
+  layoutPositions['c:' + id] = {
+    x: Math.round(at.x),
+    y: Math.round(at.y),
+  };
+  saveLayout();
+  schedule();
+}
+
 function canvasMenu(e) {
-  const items = [{ label: 'Create conversation', onSelect: () => newChatBtn.click() }];
+  /*
+   * Capture the board position NOW. The menu outlives this event and the user
+   * may pan before choosing — the conversation belongs where they
+   * right-clicked, not wherever the board has drifted to when they click Create.
+   */
+  const at = worldPoint(e.clientX, e.clientY);
+  const items = [{
+    label: 'Create conversation',
+    onSelect: () => {
+      if (state.streaming) return; // the same guard the "+" node has
+      createConversation()
+        .then((conv) => {
+          placeAtClick(conv.id, at);
+          input.focus();
+        })
+        .catch((err) => console.error('Could not start a conversation:', err));
+    },
+  }];
   if (!isFree()) {
     items.push({ sep: true });
     items.push({ label: 'Switch to Free', onSelect: () => setLayoutMode('free') });
@@ -1345,6 +1615,8 @@ function exitGraph() {
   userCollapsed.clear();
   collapsedConvs.clear();
   lastActive = null;
+  clearSearch();               // abandons any flight and empties the box
+  foldHold = 0;                // nothing is left holding the fold off
   while (graphPaths.firstChild) graphPaths.removeChild(graphPaths.firstChild);
 
   /*
@@ -1496,6 +1768,10 @@ function onGraphClick(e) {
  */
 function foldOutOfView() {
   if (state.view !== 'graph') return;
+  /* A search flight holds this off — see centerOn(). It opens a node that is,
+   * by definition, still somewhere else, and this would fold it again before
+   * the camera ever moved. The flight runs it once for real when it lands. */
+  if (foldHold) return;
   /* Node geometry is in unscaled world coordinates; the camera puts world y at
    * screen y = world * zoom + camY. Invert that so the slack stays 140 SCREEN
    * pixels rather than 140 world ones. */
@@ -1605,6 +1881,7 @@ export function initGraph() {
    * It goes through the same handler as the + node so both paths behave
    * identically — create, select, and the canvas repaints itself. */
   $('graph-empty-add').addEventListener('click', () => newChatBtn.click());
+  initSearch();
   /* Published so the workspace layer can jump back to 100% after you pick a
    * workspace — it must not import this module (graph.js is a leaf). */
   state.zoomTo = (z) => setZoom(z);

@@ -256,7 +256,7 @@ button > .ico:only-child { display: block; margin: 0 auto; }
 .logo { font-weight: 700; font-size: 16px; }
 
 /* ------------------------- workspace switcher -------------------------
-   The list-view route into workspaces: in graph view you zoom past 50%
+   The list-view route into workspaces: in graph view you zoom out to 40%
    instead, but from the list there was no way in at all. */
 
 #ws-switch-wrap { position: relative; margin: 10px 12px 0; }

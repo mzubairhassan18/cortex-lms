@@ -39,6 +39,7 @@ import { createClaim, paymentInfo } from './payment.js';
 import { adminOverview, reviewClaim } from './admin.js';
 import { createFile, deleteFile, fileText, listFiles } from './files.js';
 import { getLayout, putLayout } from './layout.js';
+import { search } from './search.js';
 
 export default {
   async fetch(request, env) {
@@ -121,6 +122,9 @@ async function route(request, env, url) {
     if (method === 'PUT') return putLayout(env, request, await read(request));
     throw new HttpError(405, 'Method not allowed');
   }
+
+  // ---- graph view search: find the text, then fly to it ----
+  if (path === '/api/search' && method === 'GET') return search(env, request, url);
 
   // ---- the chat stream ----
   if (path === '/api/chat' && method === 'POST') return chat(env, request);
