@@ -249,6 +249,22 @@
               </div>
               <div id="set-message" class="set-message"></div>
             </form>
+            <!--
+              Account menu. The Admin link starts hidden and is only un-hidden
+              when /api/settings reports role=admin, so it is invisible to
+              everyone else — and it is UI only: /api/admin reads role from
+              the database on every request, so deleting this markup buys a
+              visitor nothing. Links use '/cortex-lms/route' like the rest of this
+              document, which assemble rewrites against the deploy base.
+            -->
+            <div id="set-account" class="set-account">
+              <span id="set-who" class="set-who"></span>
+              <nav class="set-links" aria-label="Account">
+                <a id="set-pricing" href="/cortex-lms/pricing">Pricing</a>
+                <a id="set-admin" href="/cortex-lms/admin" hidden>Admin</a>
+                <button type="button" id="set-signout">Sign out</button>
+              </nav>
+            </div>
           </div>
         </div>
         <div id="library-overlay" class="hidden">

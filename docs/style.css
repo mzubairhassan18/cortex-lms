@@ -1986,6 +1986,46 @@ mark.explain-src:hover { background: var(--yellow-hover); }
 .set-message.err { color: var(--danger); }
 .set-message.working { color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
 
+/* Account menu — pinned to the bottom of the settings panel. */
+.set-account {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.set-who {
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.set-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.set-links a,
+.set-links button {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color 0.12s, color 0.12s;
+}
+.set-links a:hover,
+.set-links button:hover { border-color: var(--accent); color: var(--accent); }
+.set-links button[hidden],
+.set-links a[hidden] { display: none; }
+
 /* ---------------- Misc ---------------- */
 
 .empty {
