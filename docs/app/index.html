@@ -104,6 +104,17 @@
       <button id="left-toggle" title="Toggle conversation list"><svg class="ico" aria-hidden="true"><use href="#i-menu"></use></svg></button>
       <span id="current-title">New conversation</span>
       <button id="view-toggle" title="Switch between list view and graph view"><svg class="ico" aria-hidden="true"><use href="#i-map"></use></svg><span class="btn-label"> Graph</span></button>
+      <!--
+        Graph view's own search. Hidden unless body.graph-mode — it answers a
+        question about the canvas ("where is this written?"), so it belongs to
+        the canvas and disappears with the sidebar when you leave it. When the
+        board zooms out to the workspace layer the whole #top-bar goes too.
+      -->
+      <div id="graph-search">
+        <svg class="ico" aria-hidden="true"><use href="#i-search"></use></svg>
+        <input id="graph-search-q" type="search" placeholder="Search this workspace…" autocomplete="off" spellcheck="false" aria-label="Search conversations and explanations">
+        <span id="graph-search-note" aria-live="polite"></span>
+      </div>
       <button id="theme-toggle" title="Switch between dark and light theme"><svg class="ico" aria-hidden="true"><use href="#i-moon"></use></svg></button>
       <button id="explains-toggle" class="hidden" title="Show explain windows"><svg class="ico" aria-hidden="true"><use href="#i-bulb"></use></svg> <span class="btn-label">Explains</span> <span id="explains-count">0</span></button>
       <button id="summary-btn" title="Topics summary of this conversation"><svg class="ico" aria-hidden="true"><use href="#i-clipboard"></use></svg><span class="btn-label"> Summary</span></button>

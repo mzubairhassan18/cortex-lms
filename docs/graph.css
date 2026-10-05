@@ -60,6 +60,55 @@ body.graph-mode .summary-node #summary-overlay {
   box-shadow: none;
 }
 
+/* ------------------------- graph search -------------------------
+   A control that belongs to the canvas, so it only exists while the canvas
+   does: body.graph-mode reveals it, and body.ws-zoomed already takes the whole
+   #top-bar away when the workspace layer takes over. `flex: 0 1` makes the
+   210px a request rather than a demand — on a crowded bar this box and the
+   title give ground long before a 40px icon button does. */
+
+#graph-search {
+  display: none;
+  align-items: center;
+  gap: 7px;
+  flex: 0 1 210px;
+  min-width: 96px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  transition: border-color 0.12s, color 0.12s;
+}
+body.graph-mode #graph-search { display: flex; }
+#graph-search:focus-within { border-color: var(--accent); color: var(--accent); }
+
+#graph-search input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+#graph-search input::placeholder { color: var(--text-dim); }
+/* The browser's own clear button would otherwise render in our accent colour
+   for no reason; grey it to match the rest of the chrome. */
+#graph-search input::-webkit-search-cancel-button { filter: grayscale(1) opacity(0.6); }
+
+/* "3 / 7", "No matches". Tabular figures so stepping through the hits never
+   nudges the input you are still typing into. */
+#graph-search-note {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
 /* ------------------------- shell ------------------------- */
 
 #graph-view {
@@ -193,6 +242,132 @@ body.ws-zoomed #main-row > #chat-area { display: none; }
 .ws-title { margin: 6px 0 8px; font-size: 26px; color: var(--text); }
 .ws-sub { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
 
+/* ---------------- gesture hint (replaces the old prose) ---------------- */
+
+.ws-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  line-height: 1;
+}
+.ws-kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 7px;
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: 0 2px 6px var(--shadow-sm);
+}
+.ws-hint-tail { font-size: 12px; color: var(--text-dim); }
+
+/* ---------------- search + grid/list, same as /workspaces ---------------- */
+
+.ws-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: 100%;
+  max-width: 940px;
+}
+.ws-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 220px;
+  max-width: 330px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  transition: border-color 0.12s, color 0.12s;
+}
+.ws-search:focus-within { border-color: var(--accent); color: var(--accent); }
+.ws-search input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.ws-search input::placeholder { color: var(--text-dim); }
+/* The browser's own clear button would sit in our accent colour for no reason. */
+.ws-search input::-webkit-search-cancel-button { filter: grayscale(1) opacity(0.6); }
+
+.ws-views { display: flex; gap: 4px; }
+.ws-views button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.ws-views button:hover { color: var(--text); border-color: var(--accent); }
+.ws-views button.on { color: var(--accent); border-color: var(--accent); }
+
+.ws-none { margin: 0; font-size: 13px; color: var(--text-dim); }
+
+/* ---------------- list layout ---------------- */
+
+.ws-grid.is-list {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  width: 100%;
+  max-width: 640px;
+}
+.ws-grid.is-list .ws-card {
+  width: 100%;
+  min-height: 0;
+  flex-direction: row;
+  align-items: center;
+}
+.ws-grid.is-list .ws-open {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+}
+/* The count moves to the trailing edge so every row lines up. */
+.ws-grid.is-list .ws-count { margin-left: auto; text-align: right; }
+/* In a row there is no ribbon to dodge, so the badge's grid-mode indent has to
+   go — this rule is (0,4,0) specifically to out-rank `.ws-card.current
+   .ws-open`'s padding-top, which sits LATER in this file at equal weight. */
+.ws-grid.is-list .ws-card.current .ws-open { padding-top: 14px; }
+.ws-grid.is-list .ws-tools {
+  position: static;
+  opacity: 0;
+  margin-left: 4px;
+  padding-right: 8px;
+}
+.ws-grid.is-list .ws-badge {
+  position: static;
+  margin: 0 10px 0 0;
+  order: -1;
+}
+
 .ws-grid {
   display: flex;
   flex-wrap: wrap;
@@ -307,14 +482,19 @@ body.ws-zoomed #main-row > #chat-area { display: none; }
   transition: color 0.12s, border-color 0.12s;
 }
 #graph-rail button:hover { color: var(--accent); border-color: var(--accent); }
-/* The zoom read-out is a button too (click resets to 100%) but it is wide. */
-#rail-zoom-label {
+/* The zoom read-out and the Aligned/Free chip are buttons too (click resets to
+   100% / flips the layout) but they carry TEXT, so `#graph-rail button`'s
+   width:40px and font-size:17px must not reach them — that rule is (1,0,1) and
+   a bare #id is only (1,0,0), so the 40px box was squeezing the label and the
+   label was rendering at 17px, overflowing both. One more id wins. */
+#graph-rail #rail-zoom-label {
   width: auto;
   min-width: 40px;
   padding: 0 10px;
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ------------------------- node base ------------------------- */
@@ -569,14 +749,17 @@ body.graph-mode .ex-vdiv:has(+ .ex-pane.ex-child:empty) { display: none; }
 
 /* ---------------- Aligned / Free, on the rail ---------------- */
 
-#rail-layout {
+/* Same specificity fix as #rail-zoom-label above: this has to out-rank
+   `#graph-rail button` or "Aligned" gets squeezed into a 40px box at 17px. */
+#graph-rail #rail-layout {
   width: auto;
   min-width: 40px;
   padding: 0 10px;
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
 }
-#rail-layout.free {
+#graph-rail #rail-layout.free {
   color: var(--accent2);
   border-color: var(--accent2);
 }

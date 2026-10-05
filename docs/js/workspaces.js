@@ -21,11 +21,15 @@ import { renderSummary } from './summary.js';
 import { $, state } from './state.js';
 import { Fragment, html, render } from './views.js';
 
-export const ZOOM_WS = 0.5; // at or below this, the workspace cards take over
+export const ZOOM_WS = 0.4; // at or below this, the workspace cards take over
 
 let layer = null;
 let visible = false;
 let editing = null; // workspace id being renamed, or 'new' for the create card
+let layerQuery = ''; // the search box in the zoomed-out layer
+let layerView = 'grid'; // grid | list — same storage key as the /workspaces picker,
+                        // so the two screens have never disagreed about layout
+const VIEW_KEY = 'lb.pickerview';
 
 /* ================= data ================= */
 
@@ -156,70 +160,150 @@ function setVisible(on) {
   }
 }
 
+/* Every workspace that survives the search box — the create card is dropped
+ * while filtering, because a new workspace would never match a query. */
+function filtered() {
+  const q = layerQuery.trim().toLowerCase();
+  if (!q) return state.workspaces;
+  return state.workspaces.filter((w) => String(w.name || '').toLowerCase().includes(q));
+}
+
+function gridRows() {
+  const rows = filtered().map(
+    (w) => html`<div class=${'ws-card' + (w.id === state.workspaceId ? ' current' : '')} data-ws=${w.id}>
+      ${editing === w.id
+        ? html`<input
+            class="ws-rename"
+            data-ws-input=${w.id}
+            value=${w.name}
+            placeholder="Workspace name"
+            spellcheck="false"
+          />`
+        : html`<button class="ws-open" data-open=${w.id} type="button">
+            <span class="ws-name">${w.name}</span>
+            <span class="ws-count"
+              >${w.conversationCount || 0}
+              conversation${(w.conversationCount || 0) === 1 ? '' : 's'}</span
+            >
+          </button>`}
+      <div class="ws-tools">
+        <button class="ws-tool" data-rename=${w.id} type="button" title="Rename workspace"
+          ><svg class="ico" aria-hidden="true"><use href="#i-pencil"></use></svg></button
+        >
+        <button class="ws-tool" data-del=${w.id} type="button" title="Delete workspace"
+          ><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button
+        >
+      </div>
+      ${w.id === state.workspaceId ? html`<span class="ws-badge">Open</span>` : null}
+    </div>`
+  );
+
+  if (!layerQuery.trim()) {
+    rows.push(html`<div class="ws-card ws-create">
+      ${editing === 'new'
+        ? html`<input
+            class="ws-rename"
+            data-ws-input="new"
+            placeholder="Workspace name"
+            spellcheck="false"
+          />`
+        : html`<button class="ws-open ws-new" data-new type="button">
+            <span class="ws-name"
+              ><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg> New
+              workspace</span
+            >
+            <span class="ws-count">a blank one</span>
+          </button>`}
+    </div>`);
+  }
+  return rows;
+}
+
+const isEmpty = () => filtered().length === 0 && !!layerQuery.trim();
+
+/*
+ * The grid ONLY. Typing in the search box has to refresh the cards without
+ * rebuilding the toolbar — re-rendering the input on every keystroke would
+ * discard its focus and caret, which is exactly why the /workspaces picker
+ * keeps its search field outside the element it re-renders.
+ */
+function renderCards() {
+  if (!layer) return;
+  const grid = layer.querySelector('[data-ws-grid]');
+  // Never fall back to renderLayer() from in here: renderLayer() calls THIS,
+  // and a missing grid would bounce between the two until the stack ran out.
+  if (!grid) return;
+  render(html`<${Fragment}>${gridRows()}</${Fragment}>`, grid);
+  const none = layer.querySelector('.ws-none');
+  if (none) none.hidden = !isEmpty();
+}
+
 function renderLayer() {
   if (!layer) return;
+  const view = layerView;
   render(
     html`<${Fragment}>
       <div class="ws-head">
         <span class="ws-eyebrow">Zoomed out</span>
         <h2 class="ws-title">Workspaces</h2>
-        <p class="ws-sub">
-          Every conversation lives in a workspace. Pick one to dive back in — or start a new
-          workspace.
+        <!--
+          How to get back. The old prose told you what a workspace is; the real
+          question when the board has vanished is which gesture brings it back,
+          and that gesture needs Ctrl (plain wheel still pans) — so say it.
+        -->
+        <p class="ws-sub ws-hint">
+          <kbd class="ws-kbd">CTRL</kbd>
+          <span class="ws-hint-op">+</span>
+          <kbd class="ws-kbd">MOUSE WHEEL</kbd>
+          <span class="ws-hint-tail">to zoom back in</span>
         </p>
       </div>
-      <div class="ws-grid">
-        ${state.workspaces.map(
-          (w) => html`<div
-            class=${'ws-card' + (w.id === state.workspaceId ? ' current' : '')}
-            data-ws=${w.id}
+
+      <div class="ws-bar">
+        <label class="ws-search">
+          <svg class="ico" aria-hidden="true"><use href="#i-search"></use></svg>
+          <input
+            type="search"
+            data-ws-q
+            value=${layerQuery}
+            placeholder="Search workspaces…"
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="Search workspaces"
+          />
+        </label>
+        <div class="ws-views" role="group" aria-label="Layout">
+          <button
+            type="button"
+            data-ws-view="grid"
+            class=${view === 'grid' ? 'on' : ''}
+            aria-pressed=${view === 'grid' ? 'true' : 'false'}
+            title="Grid view"
           >
-            ${editing === w.id
-              ? html`<input
-                  class="ws-rename"
-                  data-ws-input=${w.id}
-                  value=${w.name}
-                  placeholder="Workspace name"
-                  spellcheck="false"
-                />`
-              : html`<button class="ws-open" data-open=${w.id} type="button">
-                  <span class="ws-name">${w.name}</span>
-                  <span class="ws-count"
-                    >${w.conversationCount || 0}
-                    conversation${(w.conversationCount || 0) === 1 ? '' : 's'}</span
-                  >
-                </button>`}
-            <div class="ws-tools">
-              <button class="ws-tool" data-rename=${w.id} type="button" title="Rename workspace"
-                ><svg class="ico" aria-hidden="true"><use href="#i-pencil"></use></svg></button
-              >
-              <button class="ws-tool" data-del=${w.id} type="button" title="Delete workspace"
-                ><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button
-              >
-            </div>
-            ${w.id === state.workspaceId ? html`<span class="ws-badge">Open</span>` : null}
-          </div>`
-        )}
-        <div class="ws-card ws-create">
-          ${editing === 'new'
-            ? html`<input
-                class="ws-rename"
-                data-ws-input="new"
-                placeholder="Workspace name"
-                spellcheck="false"
-              />`
-            : html`<button class="ws-open ws-new" data-new type="button">
-                <span class="ws-name"
-                  ><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg> New
-                  workspace</span
-                >
-                <span class="ws-count">a blank one</span>
-              </button>`}
+            <svg class="ico" aria-hidden="true"><use href="#i-grid"></use></svg> Grid
+          </button>
+          <button
+            type="button"
+            data-ws-view="list"
+            class=${view === 'list' ? 'on' : ''}
+            aria-pressed=${view === 'list' ? 'true' : 'false'}
+            title="List view"
+          >
+            <svg class="ico" aria-hidden="true"><use href="#i-list"></use></svg> List
+          </button>
         </div>
       </div>
+
+      <div class=${'ws-grid' + (view === 'list' ? ' is-list' : '')} data-ws-grid></div>
+      <p class="ws-none">No workspace matches that search.</p>
     <//>`,
     layer
   );
+  /* Fill the grid and set the empty-state flag from here rather than from the
+   * template: `.hidden` is a DOM property, and driving a boolean attribute
+   * through the template is exactly the kind of thing that works until it
+   * doesn't. */
+  renderCards();
 }
 
 function focusInput() {
@@ -245,6 +329,13 @@ async function commitName(key, value) {
 }
 
 function onClick(e) {
+  const view = e.target.closest('[data-ws-view]');
+  if (view) {
+    layerView = view.dataset.wsView === 'list' ? 'list' : 'grid';
+    try { localStorage.setItem(VIEW_KEY, layerView); } catch { /* private mode */ }
+    renderLayer();
+    return;
+  }
   const open = e.target.closest('[data-open]');
   if (open) {
     switchWorkspace(open.dataset.open);
@@ -278,6 +369,13 @@ function onKeydown(e) {
   if (e.key !== 'Enter') return;
   const inp = e.target.closest('[data-ws-input]');
   if (inp) commitName(inp.dataset.wsInput, inp.value);
+}
+
+/* Search re-renders the grid only — see renderCards(). */
+function onInput(e) {
+  if (!e.target.closest('[data-ws-q]')) return;
+  layerQuery = e.target.value;
+  renderCards();
 }
 
 /* ================= list-view switcher =================
@@ -406,10 +504,28 @@ export async function initWorkspaces() {
   if (layer) {
     layer.addEventListener('click', onClick);
     layer.addEventListener('keydown', onKeydown);
+    layer.addEventListener('input', onInput);
+    try { layerView = localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid'; }
+    catch { /* private mode */ }
     renderLayer();
   }
-  // graph.js pushes zoom out through this instead of us importing it.
-  state.onZoomChange = (z) => setVisible(state.view === 'graph' && z <= ZOOM_WS);
+  /*
+   * graph.js pushes zoom out through this instead of us importing it.
+   *
+   * Zooming back IN past the threshold is the "dive back in" gesture: land in
+   * the workspace you had open, at full size, rather than leaving a 41%-sized
+   * board behind. It only fires on a real crossing — this same callback runs at
+   * boot with whatever zoom was saved, and snapping THAT to 100% would undo the
+   * user's zoom on every load.
+   */
+  state.onZoomChange = (z) => {
+    const show = state.view === 'graph' && z <= ZOOM_WS;
+    const wasVisible = visible;
+    setVisible(show);
+    if (wasVisible && !show && state.zoomTo && state.zoomLevel && state.zoomLevel() < 1) {
+      state.zoomTo(1);
+    }
+  };
   // If the graph applied its saved zoom before we registered, ask it now.
   if (state.zoomLevel) state.onZoomChange(state.zoomLevel());
 }
