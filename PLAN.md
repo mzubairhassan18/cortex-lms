@@ -610,8 +610,12 @@ Migrations live in `supabase/migrations/`, applied via the Supabase MCP.
   Text extraction moves to the **browser** (`mammoth` + `pdf.js` browser
   builds, served via the existing import map) so the Edge Function stays a
   thin LLM proxy and never touches multi-MB uploads.
-- Existing local `data/conversations.json` → **still pending (Q6)**, needs a
-  signed-in account first because every row has an FK to `auth.users`.
+- Existing local `data/conversations.json` → **migrated 2026-10-05 (Q6)**:
+  8 conversations (6 real, 2 empty placeholders) and both workspaces, every
+  row owned by the signed-in account. The FK to `auth.users` was satisfied by
+  running the inserts with `request.jwt.claims` set to that user's `sub`, so
+  RLS saw the real owner and the `with_check` policies passed on their own
+  terms — no service-role key and no anon grant were needed.
 
 **The one RLS exception:** `profiles` is *enabled* but **not forced**. Forcing
 would make the table owner subject to RLS, which breaks (a) the signup
@@ -867,7 +871,8 @@ scheme (verified: light-visit → `/app` → still light).
     Supabase Edge Function** *(P3.5, 2026-10-05; §4 records why the host
     changed and why the Worker forwards the caller's JWT instead of using a
     service role key)*
-17. [ ] Migrate existing local data *(pending Q6)*
+17. [x] Migrate existing local data *(Q6, 2026-10-05 — all 8 conversations
+    plus both workspaces, nothing deleted; route recorded in PROGRESS Q6)*
 
 **P3 — Ship**
 18. Host it free — **decided: GitHub Pages + Supabase Edge Function (§4)**
@@ -885,7 +890,7 @@ scheme (verified: light-visit → `/app` → still light).
 | Q3 | Phase order — P1 UI first, or auth/workspaces first? | **resolved 2026-10-03 — P1 first** (user: local full working demo, then Supabase creds) |
 | Q4 | Auth provider: Supabase Auth vs self-rolled? | **resolved 2026-10-04 — Supabase Auth.** Google OAuth is the primary sign-in (user: "essential"), email magic link as the free fallback. Needs a Google Cloud OAuth client + the provider enabled in the Supabase dashboard (user action). |
 | Q5 | Drizzle yes/no + state-lib yes/no | **resolved: both no** |
-| Q6 | Migrate the existing 6 local conversations into a workspace? | **open** (P2) |
+| Q6 | Migrate the existing 6 local conversations into a workspace? | **resolved 2026-10-05** — all 8 (6 real + 2 empty placeholders) and both workspaces are in Supabase, owned by the signed-in account; route and the one duplicate-workspace mistake recorded in PROGRESS Q6 |
 | Q7 | "encapsulate under user preferences, no sidebar route, just give a link" — what is this? | **open** |
 | Q8 | Graph view: does it *replace* the list view or coexist forever? | **resolved 2026-10-03 — coexist behind the header toggle** (brief: "list view ⇄ graph view") |
 | Q9 | Summary/quiz accuracy rework — start where? | **resolved 2026-10-04 — Phases 1+2 (+3) implemented and live-verified, §9.3**; only P4 (pin a model / BYOK) still open, blocked on P2 |

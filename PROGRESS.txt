@@ -844,7 +844,34 @@ OPEN QUESTIONS (see PLAN.md section 7)
         client and enabling the provider.
 [x] Q5  Drizzle + state-lib -> BOTH NO. Plain JS, no build step; state.js +
         explicit Preact renders; @preact/signals only if state gets painful.
-[!] Q6  Migrate the existing 6 local conversations?  (P2)
+[x] Q6  2026-10-05 DONE — all 8 local conversations are in Supabase (the
+        count in the old wording was 6: there are 6 real ones plus 2 empty
+        "New conversation" placeholders), together with the "Physics lab"
+        workspace v1 had. Verified: My workspace = 8 conversations / 40
+        messages (38 migrated + the 2-message test conversation), Physics
+        lab = 1. Created dates preserved 2026-09-30 → 2026-10-03, every row
+        archived=false.
+        ROUTE CHOSEN — no service-role key from the dashboard and no scoped
+        anon INSERT grant. The migration ran inside the tool sandbox: it read
+        data/conversations.json over file:// and handed each conversation to
+        execute_sql in its own BEGIN/COMMIT with request.jwt.claims set to
+        the owner's sub, so auth.uid() resolved and the with_check policies
+        saw exactly the user the rows were being written for. The data never
+        entered the model's context — file:// to SQL in one hop, which is why
+        90 KB moved without a single truncation.
+        ONE MISTAKE, RECOVERED: v1's "My workspace" (musna8lz383j3) is NOT
+        the row the Worker bootstrapped (muusv5cs24hr4). Matching by name
+        failed on the first pass — String()-ing the MCP result gave
+        "[object Object]" instead of the JSON, so the name map came back
+        empty and v1's workspace was inserted as a duplicate. Fixed by moving
+        the seven conversations onto the bootstrapped row and deleting the
+        duplicate; "Physics lab" kept v1's id (musnxxtu47xfi) since nothing
+        had bootstrapped it, so its conversation needed no remap.
+        Columns map 1:1 (id/title/messages/explains/summary/quiz/tests/notes);
+        createdAt/updatedAt are epoch ms -> to_timestamp(…/1000). The one
+        conversation carrying `files` had an empty array, so nothing was
+        dropped. Every insert is ON CONFLICT (id) DO NOTHING, so re-running
+        is safe.
 [!] Q7  "encapsulate under user preferences, no sidebar route, just give a
         link" — meaning unclear, needs clarification
 [x] Q8  2026-10-03 Graph view coexists with list view behind the header toggle
