@@ -38,6 +38,7 @@ import { chat } from './chat.js';
 import { createClaim, paymentInfo } from './payment.js';
 import { adminOverview, reviewClaim } from './admin.js';
 import { createFile, deleteFile, fileText, listFiles } from './files.js';
+import { getLayout, putLayout } from './layout.js';
 
 export default {
   async fetch(request, env) {
@@ -113,6 +114,13 @@ async function route(request, env, url) {
   }
   if (path === '/api/models' && method === 'GET') return getModels(env, request);
   if (path === '/api/model-info' && method === 'GET') return getModelInfo(env, request, url);
+
+  // ---- graph view layout: Aligned / Free ----
+  if (path === '/api/layout') {
+    if (method === 'GET') return getLayout(env, request);
+    if (method === 'PUT') return putLayout(env, request, await read(request));
+    throw new HttpError(405, 'Method not allowed');
+  }
 
   // ---- the chat stream ----
   if (path === '/api/chat' && method === 'POST') return chat(env, request);

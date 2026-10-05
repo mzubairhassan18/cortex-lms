@@ -501,6 +501,20 @@ content on top of the camera. `clip` means there is nothing to scroll at all.
   140 *screen* pixels, and it runs after every camera write, which still
   converges: a folded explain loses `.expanded`, so the next pass has nothing
   to collapse.
+- **Right-click menus + ALIGNED/FREE modes** *(P1.35, 2026-10-05)* — the rest
+  of the Figma affordance. `canPanFrom` already rejected `e.button !== 0` and
+  excluded `.gnode` for the primary button, and no `contextmenu` handler
+  existed anywhere, so both gesture slots were already free. Right-click gives
+  *Create conversation* on the board, a conversation menu on a node and an
+  explanation menu on another; **inside `.gn-host` the browser menu is left
+  alone**, because that is where copy and paste live. FREE mode is an *overlay*
+  on the existing pure `layout()`: saved `x/y` win, everything else still comes
+  from the computed board, so untouched nodes keep shifting with the column the
+  way they always did. Coordinates may be **negative** (see §4) and a drag
+  claims `camTouched`, or `placeCamera()` would re-centre as the canvas grows
+  and the node would lag the cursor. Persisted in `profiles.graph_layout` via
+  `GET/PUT /api/layout`. Full reasoning and the security probe behind the write
+  path are in PROGRESS P1.35.
 
 **The library: `@use-gesture/vanilla` 10.3.1** (MIT, poimandres/pmndrs — the
 zustand/react-spring team; 4.3 KB + 11 KB core, one transitive dep, ESM only).
@@ -957,6 +971,7 @@ scheme (verified: light-visit → `/app` → still light).
 | 2026-10-05 | **SECURITY DEFINER helpers live in a `private` schema, never `public`.** PostgREST only serves `public`, so `public.is_admin()` was RPC-callable by anyone holding the anon key — and revoking from `anon` alone does nothing, because **PostgreSQL grants EXECUTE to `PUBLIC` by default** and `anon` inherits it. Moving all three to `private` cleared both advisor lints (now 0 findings). Verified with a probe that PostgreSQL checks EXECUTE at trigger *creation*, not fire time, so revoking cannot break sign-up. |
 | 2026-10-05 | **`updated_at` is set by a database trigger, not trusted from the client** — `conversations_ws_time_idx` orders the conversation list by it, so an un-stamped row would strand a chat at the bottom forever. |
 | 2026-10-05 | **Originals go to R2, and Free keeps them.** The user enabled R2 ("you can use r2 i guess for storage, why bloat supabase"), so the backend moved off Supabase Storage; the bucket is reached by the `env.BUCKET` binding, which means one account, one deploy, and no CORS or public URL. **"Free stores text only" is dropped** — it existed to spare metered Storage egress, R2 does not charge egress, and the pricing table advertises 50 MB on Free anyway. Storage is now metered per plan against `plans.storage_mb` (413 on overflow, read fail-open). Extraction stays in the **browser**: pdf.js and mammoth are multi-MB and DOM-bearing and a Worker request has a CPU budget in milliseconds. §3.3. |
+| 2026-10-05 | **Free-mode coordinates may be negative; there is no normalisation step.** `#graph-canvas` has no `overflow` rule and `#graph-edges` sets `overflow: visible`, so the world left of the origin already paints — the camera was built precisely so there would be no edge. Shifting saved coordinates back to a non-negative origin would translate the *whole* board on screen mid-drag (relative positions survive a translation, the camera does not absorb it), so the saved value is the displayed value and there is nothing to correct for drift. The only code that assumed an origin was `placeCamera()`; it now takes `baseX/baseY` and is provably identical to the old expression over 5000 samples whenever they are 0 — which is every Aligned case. Layout lives in **`profiles.graph_layout`** (one jsonb column, not a table) because it is one person's view preference written as a whole and no query needs to look inside it. The write path was *probed*, not assumed: `profiles: write own` looks sufficient to promote yourself on paper (PostgreSQL ORs a command's checks), but `private.guard_profile_elevation` blocks it — tested with a throwaway identity as `authenticated`, blocked, cleaned up in the same statement. That trigger only fires on `role`/`plan`/`plan_expires_at`, so layout passes through. P1.35. |
 
 ---
 

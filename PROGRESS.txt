@@ -484,6 +484,93 @@ See PLAN.md 2.5 for the full write-up.
             Pre-existing file note: style.css is still mixed-EOL in HEAD; this
             change did not touch it.
 
+[x] P1.35 2026-10-05 Right-click menus + ALIGNED/FREE layouts (Figma-style).
+           TWO GESTURE SLOTS WERE ALREADY FREE, which is why this was not the
+           rewrite it looks like: canPanFrom returns false for e.button !== 0
+           (so the right button did nothing at all), it excludes .gnode for the
+           primary button (so left-dragging a node did nothing either), and no
+           contextmenu handler existed anywhere in public/js. Panning, zooming
+           and the camera already existed, so the hard half of "an infinite
+           canvas" was done.
+           THE MENU (public/js/graph-menu.js): a single fixed-position element
+           on <body>, never a child of #graph-canvas — inside the canvas the
+           camera's scale would resize it with the zoom, unreadable at 30% and
+           huge at 2.5x. Viewport coords also let it clamp to the window.
+           Opens on contextmenu; any pointerdown outside, Escape, resize or
+           blur dismisses it; armed one tick late so the press that opened it
+           cannot close it. Canvas -> "Create conversation" (plus Switch to Free
+           / Reset positions when they apply); conversation -> Open / Show all
+           explanations / Show summary / Delete; explanation -> Expand/Collapse
+           / Close explanation. Deliberately NOT offered: right-clicking inside
+           .gn-host (the parked live chat and open containers) keeps the
+           browser's menu, because that is where copy and paste live and taking
+           them would be a regression. Rename was considered and left out —
+           updateConversation() has no title field, so it would have meant an
+           untested API path for a feature nobody asked for.
+           FREE MODE is an overlay, not a second layout: layoutAligned() is the
+           original function untouched, and layout() applies saved x/y on top of
+           its result, then recomputes W/H/minX/minY. A node with no saved entry
+           falls through to the computed one — deliberately, because the
+           computed column shifts when conversations are added or removed and a
+           position the user never chose should not be frozen by accident.
+           Dragging moves the conversation plus everything on the board for it
+           (the summary and its explanations) — conversations that are not
+           active have no children rendered, so they move alone, which is still
+           enough to separate trees. Grab is the HEADER only: the body of the
+           active conversation is the live chat and taking that gesture would
+           fight text selection. putIn() early-returns when the element is
+           already in place, so the per-frame re-render does not yank focus out
+           of the input. The existing swallowUntil stops the drag also opening
+           the node, with a 3px threshold so a jittery click still opens it.
+           NEGATIVE COORDINATES ARE LEGAL. #graph-canvas has no overflow rule
+           and #graph-edges sets overflow:visible, so the world left of the
+           origin paints — and normalising to a non-negative origin would shift
+           the WHOLE board on screen mid-drag (relative positions survive a
+           translation, but the camera does not absorb it). So the saved value
+           is the displayed value and there is no drift to correct. The one
+           thing that assumed an origin was placeCamera(); baseX/baseY were
+           added and PROVEN REGRESSION-FREE: the new expression is
+           byte-for-byte the old one over 5000 random samples whenever
+           baseX/baseY are 0, which is every Aligned case, and with a board
+           reaching 400 left it puts that edge exactly on CAM_PAD.
+           A DRAG CLAIMS camTouched on its first real move — otherwise
+           placeCamera() would keep re-centring as the canvas grew and the node
+           would appear to lag the cursor. Panning and zooming already did this;
+           a first-time drag had to as well.
+           STORAGE: profiles.graph_layout jsonb (migration 20261005000004,
+           applied and recorded), {"mode":"aligned"|"free","positions":{...}},
+           keys matching graph.js node keys. One column rather than a table: it
+           is one person's view preference written as a whole, and no query
+           needs to look inside it.
+           SECURITY CHECK BEFORE RELYING ON IT: the write path goes through
+           profiles: write own, whose with_check is only `id = auth.uid()` —
+           and PostgreSQL ORs the checks for a command, so on paper that lets
+           anybody PATCH their own role to admin. TESTED rather than asserted:
+           a throwaway auth.users + profiles pair, SET ROLE authenticated with
+           that sub, UPDATE set role='admin' -> "Only an administrator can
+           change plan or role", from private.guard_profile_elevation. Blocked;
+           the probe row was deleted in the same statement (verified: no row
+           left behind). That trigger only fires on role/plan/plan_expires_at,
+           so graph_layout passes through untouched.
+           Worker: GET/PUT /api/layout (worker/layout.js) sanitising to a known
+           mode, string keys under 128, finite numbers under 1e6, 400 entries
+           max, 513KB body cap. Unit-tested from node: negatives preserved and
+           rounded, '12' as x rejected, {x:null} rejected (Number(null) is 0 —
+           that would have silently written the origin), junk root and bad mode
+           fall back to aligned, 900 entries -> 400 stored, 600KB -> 413,
+           empty GET -> {"mode":"aligned","positions":{}}.
+           One race closed before shipping: the boot fetch and a first drag can
+           overlap, so loadLayout() MERGES the server copy underneath the local
+           one instead of replacing it.
+           VERIFIED LIVE: 8/8 routes 200; /api/layout 401 unauthenticated with
+           the same {"error":"Sign in first."} as its neighbours; the served
+           graph.js carries startNodeDrag/onContextMenu/setLayoutMode/
+           layoutAligned; graph-menu.js, the .gctx rules and rail-layout are all
+           served; all four edited files parse as ESM. NOT TESTED HERE: actually
+           right-clicking, dragging and reloading to see Free persist — that
+           needs a real browser and is the user's to run in Chrome. Worker
+           version df564ecb.
+
 P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
 ------------------------------------------------------
 [x] P2.1  2026-10-05 Schema + RLS from row one (supabase/migrations/)
