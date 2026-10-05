@@ -689,6 +689,68 @@ P2 — IDENTITY  (auth, workspaces, per-user data, BYOK)
           caller's own Authorization header to PostgREST instead of holding a
           service role key, which is why no route has to re-check ownership
           itself. See P3.5 / P3.5b / P3.5c.
+[x] P2.12 2026-10-05 File storage on R2 — the four 501s are gone.
+          Routes: POST /api/conversations/:id/files, GET .../:fid/text,
+          DELETE .../:fid, GET /api/files, all in worker/files.js.
+          SCHEMA FIX FIRST: `files` had no created_at column at all, and the
+          library renders `at` and sorts newest-first — PostgREST would have
+          ordered by ctid, which moves whenever a row is updated. Added the
+          column (default now(), so the rows that existed got a real time) and
+          swapped files_user_idx for (user_id, created_at desc), which is what
+          "the library, newest first, mine only" actually asks for. The
+          migration had to land BEFORE the deploy: listFiles orders by
+          created_at and PostgREST 400s on a column it does not have.
+          THE SPLIT: extracted text stays in Postgres (what every turn reads,
+          unmetered), original bytes go to R2 at <uid>/<conv_id>/<file_id>.
+          Reached by the env.BUCKET binding, not over the network, so one
+          account, one deploy, no CORS and no public URL to guess.
+          "FREE STORES TEXT ONLY" IS DROPPED. It existed to spare Supabase
+          Storage's metered 5 GB egress; R2 charges no egress, and the pricing
+          table advertises 50 MB on Free anyway. Every plan now keeps its
+          original, metered against plans.storage_mb (413 on overflow). That
+          check reads FAIL-OPEN on purpose — a product rule about a shared
+          10 GB bucket, not a security boundary; the insert underneath it
+          still goes through RLS.
+          Extraction moved to the browser, as PLAN §3.3 decided: pdf.js and
+          mammoth are multi-MB, DOM-bearing libraries and a Worker request is
+          billed a CPU budget in milliseconds, so parsing a PDF there would
+          have blown it on the first upload. public/js/extract.js runs BEFORE
+          the bytes move, so an unsupported file fails before a multi-MB POST.
+          public/js/files.js now reads the file ONCE — the extractor and the
+          base64 body want the same bytes — and shows a "Reading …" toast,
+          because downloading a 3 MB pdf.js worker takes long enough to look
+          hung otherwise.
+          VENDORED CODE + ITS PROVENANCE: scripts/vendor-libs.mjs copies
+          pdf-parse's `web` build (the same PDFParse wrapper v1 proved against
+          — both test PDFs, full text) and mammoth's browser bundle out of
+          node_modules, strips the sourceMappingURL trailers (the .map files
+          total 6.8 MB and would only 404), writes UTF-8 with no BOM. The
+          paired pdf.worker.mjs travels with the same package on purpose:
+          pdf.js refuses a worker whose protocol it does not recognise.
+          pdf.js resolves workerSrc against window.location and the app is
+          served at /app/, so extract.js gives it an absolute URL built from
+          import.meta.url — the same trick that keeps paths correct at the
+          root deploy and under /cortex-lms/.
+          OWNERSHIP: loadConv() reads the conversation through RLS first, so a
+          foreign id is a 404 instead of a file quietly pinned to somebody
+          else's thread — the FK only checks existence, not ownership. The
+          library list joins conversations inside the Worker and HIDES files
+          whose conversation is archived: "Open" would target a chat the
+          sidebar no longer has (restoring it brings the files back).
+          VERIFIED: 8/8 pages 200; 5/5 assets 200 at the expected byte sizes;
+          5/5 API routes 401 unauthenticated including a /api/model-info
+          regression check. Extractor unit-tested from node — extOf across
+          case/dots/dirs/no-extension, plain text, BOM stripping, utf-8, and
+          the exact v1 error strings for .png, .doc and extension-less files.
+          All four changed files parse as ESM. `authenticated` confirmed to
+          hold select/insert/update/delete on files, conversations, profiles
+          and platform_settings with RLS on; `revoke all ... from anon` is why
+          an anon-key probe comes back 401/42501, which is the asymmetry the
+          Worker relies on by sending the user's own JWT.
+          NOT TESTED HERE: the authenticated round trip (row insert -> R2 put)
+          needs a real session, and pdf/docx extraction needs a real browser —
+          both are the user's to run in their own Chrome. Live version
+          718366b2.
 
 P3 — SHIP
 ---------
@@ -806,9 +868,10 @@ P3 — SHIP
           shared one provider config and one API key; POST /api/chat as an SSE
           proxy keeping the delta/route/error/done contract, with first-byte
           and idle-gap timeouts and the one-retry rule.
-          NOT ported: file Storage -> 501 with an honest message.
-          GET /api/files -> [] is the truth, not a stub: v1 kept uploads on
-          local disk so nothing has ever been stored server-side.
+          NOT ported AT THE TIME: file Storage -> 501 with an honest message,
+          and GET /api/files -> [] was the truth rather than a stub, because
+          v1 kept uploads on local disk and nothing had ever been stored
+          server-side. Both closed the same day by P2.12 (R2).
           Security shape: NO service role key anywhere in the Worker. It
           forwards the caller's own Authorization header to PostgREST, so the
           database authenticates as that user and RLS (user_id = auth.uid())

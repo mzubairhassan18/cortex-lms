@@ -37,6 +37,7 @@ import { getModelInfo } from './model-info.js';
 import { chat } from './chat.js';
 import { createClaim, paymentInfo } from './payment.js';
 import { adminOverview, reviewClaim } from './admin.js';
+import { createFile, deleteFile, fileText, listFiles } from './files.js';
 
 export default {
   async fetch(request, env) {
@@ -61,7 +62,18 @@ async function route(request, env, url) {
 
   // ---- conversations ----
   if (root === 'conversations') {
-    if (sub === 'files') return filesNotReady(id, seg, method, request);
+    if (sub === 'files') {
+      // seg = ['api','conversations',':id','files'(,':fid'(,'text'))]
+      if (seg.length === 4 && method === 'POST') {
+        return createFile(env, request, id, await read(request));
+      }
+      const fid = seg[4];
+      if (seg.length === 5 && method === 'DELETE') return deleteFile(env, request, id, fid);
+      if (seg.length === 6 && seg[5] === 'text' && method === 'GET') {
+        return fileText(env, request, id, fid);
+      }
+      throw new HttpError(405, 'Method not allowed');
+    }
     if (!id) {
       if (method === 'GET') return listConversations(env, request, url);
       if (method === 'POST') return createConversation(env, request, await read(request));
@@ -121,28 +133,9 @@ async function route(request, env, url) {
   }
 
   // ---- the library ----
-  // v1 kept uploads on the laptop's disk, so nothing has ever been stored
-  // server-side: an empty list is the truth today, not a placeholder. The
-  // upload routes themselves are honest about not existing yet.
-  if (path === '/api/files' && method === 'GET') return json([]);
+  if (path === '/api/files' && method === 'GET') return listFiles(env, request, url);
 
   throw new HttpError(404, 'Not found');
-}
-
-/** Upload/download routes: not ported yet — say so rather than 404. */
-function filesNotReady(convId, seg, method, request) {
-  // seg = ['api','conversations',':id','files'(,':fid'(,'text'))]
-  if (seg.length === 4) {
-    // v1 kept uploads on the laptop's disk, so nothing has ever been stored
-    // server-side: an empty list is the truth today, not a placeholder.
-    if (method === 'GET') return json([]);
-    if (method === 'POST') {
-      return json({ error: 'File storage is not available on this host yet.' }, 501);
-    }
-  }
-  // Removing something that was never stored is a no-op, not a failure.
-  if (seg.length === 5 && method === 'DELETE') return json({ ok: true });
-  return json({ error: 'File storage is not available on this host yet.' }, 501);
 }
 
 async function read(request) {

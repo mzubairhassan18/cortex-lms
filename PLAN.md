@@ -602,14 +602,27 @@ Migrations live in `supabase/migrations/`, applied via the Supabase MCP.
 - **`usage_daily` is a rollup, not an event log** — one row per user per day.
   An event table would be ~100× bigger for the same answers, and the 500 MB
   database is our tightest resource.
-- **Storage plan (decided 2026-10-04):** extracted text in Postgres (API reads
-  are unmetered; Storage egress is 5 GB), originals in the private `library`
-  bucket at `<uid>/<conv_id>/<file_id>`. **Free plan stores text only**
-  (`storage_path` stays null) — a 5 MB PDF becomes ~100 KB of text, which is
-  ~50× less storage and lifts the free-tier ceiling from ~20 users to hundreds.
-  Text extraction moves to the **browser** (`mammoth` + `pdf.js` browser
-  builds, served via the existing import map) so the Edge Function stays a
-  thin LLM proxy and never touches multi-MB uploads.
+- **Storage plan (decided 2026-10-04; backend moved to R2 2026-10-05):**
+  extracted text in Postgres (API reads are unmetered), originals in an **R2**
+  bucket at `<uid>/<conv_id>/<file_id>`, reached through the `env.BUCKET`
+  binding rather than over the network — so there is no CORS to configure and
+  no public URL for somebody to guess. The split puts each half where it is
+  cheap: a 5 MB PDF is ~100 KB of text and 5 MB of blob, and the free tiers
+  they land in are 500 MB of Postgres and 10 GB of R2 with no egress charge.
+  **Every plan keeps its original**, metered against `plans.storage_mb` (Free
+  50 MB / Pro 1 GB / Team 10 GB) — that is what the pricing table sells. The
+  earlier "Free stores text only" rule existed to spare *Supabase Storage's*
+  metered 5 GB egress, and R2 does not charge for egress, so the constraint it
+  protected is gone. Exceeding the budget is a 413, and the check reads
+  fail-open: it is a product rule about a shared bucket, not a security
+  boundary — the insert below it still goes through RLS.
+  Text extraction happens in the **browser** (`public/js/extract.js`, loading
+  the vendored `mammoth` and `pdf.js` builds lazily on first use), because
+  both are multi-MB and DOM-bearing while a Worker request is billed a CPU
+  budget in milliseconds. The Worker validates, sizes and stores; it never
+  parses. V1's two test PDFs and both DOCX files were proven against this same
+  wrapper (§3.3 history), and `scripts/vendor-libs.mjs` records where the
+  copies came from.
 - Existing local `data/conversations.json` → **migrated 2026-10-05 (Q6)**:
   8 conversations (6 real, 2 empty placeholders) and both workspaces, every
   row owned by the signed-in account. The FK to `auth.users` was satisfied by
@@ -928,12 +941,13 @@ scheme (verified: light-visit → `/app` → still light).
 | 2026-10-04 | **`liftBoard()`'s guard was inverted** (`lift <= 0` where `lift = min(0, min y)` is always ≤ 0) — a no-op since `d37659e`, and the actual cause of explanations sitting under the header. Now `lift >= 0`. Fix this independently of the canvas work: it is the bug, the camera is the experience. |
 | 2026-10-04 | **One library, deliberately narrow: `@use-gesture` for wheel + pinch only.** Device decoding (trackpad, multi-touch) is the hard part and worth buying; the camera maths and the pan rules (Space / middle button / empty board, click suppression) are app policy and stay here. A canvas renderer — Konva/Pixi/litegraph/react-flow — would have to *redraw the live DOM* the nodes host, and `panzoom`/`d3-zoom` own the transform we just took over. Served from `node_modules` by a new `/lib/use-gesture` route + an import map, so there is still no build step. **`pinchOnWheel: false` or Ctrl+wheel zooms twice** (100 % → 232 %). |
 | 2026-10-04 | **Hosting = GitHub Pages (static) + Supabase Edge Function (proxy).** $0, no VPS, no cold start. GitHub Pages *alone* cannot work: the BYOK proxy needs a server (no CORS from providers), project sites serve under a sub-path while our asset URLs are absolute, and `/app`+`/workspaces` are not files. Vercel rejected because the Hobby plan is non-commercial and its duration limits fight our 120 s first-byte / 45 s idle gaps. Supabase Free **pauses after 1 week idle**, so a GitHub Actions heartbeat is mandatory. §4. |
-| 2026-10-04 | **Storage: text in Postgres, originals in Supabase Storage, and Free stores text only.** Storage egress is metered (5 GB) while Postgres API reads are unmetered, and the extracted text is what the app actually reads. Keeping originals for paid plans only turns a 5 MB PDF into ~100 KB of text — ~50× less storage, lifting the free ceiling from ~20 users to hundreds. Extraction moves to the browser (`mammoth`/`pdf.js` browser builds) so the Edge Function never handles multi-MB uploads. R2 deferred by the user ("skip it, for now"). §3.3. |
+| 2026-10-04 | **Storage: text in Postgres, originals in Supabase Storage, and Free stores text only.** Storage egress is metered (5 GB) while Postgres API reads are unmetered, and the extracted text is what the app actually reads. Keeping originals for paid plans only turns a 5 MB PDF into ~100 KB of text — ~50× less storage, lifting the free ceiling from ~20 users to hundreds. Extraction moves to the browser (`mammoth`/`pdf.js` browser builds) so the Edge Function never handles multi-MB uploads. R2 deferred by the user ("skip it, for now"). §3.3. → **Partly superseded 2026-10-05** — see the R2 row below; the browser-extraction half stands. |
 | 2026-10-04 | **Pricing tiers meter our Supabase resources, not tokens** — BYOK means the user pays for their own LLM usage, so the scarce things are Edge Function invocations (500 K/mo) and database size (500 MB, the real ceiling). Free 50 req/day · Pro $9/mo · Team $29/mo. **Payment is bank transfer, no Stripe**: user files a `payment_claims` row, an admin approves it and the plan flips. |
 | 2026-10-05 | **Blobs stay JSONB on `conversations`; `usage_daily` is a rollup, not an event log.** The app loads a conversation whole, so normalising `messages`/`explains`/`summary`/`quiz` buys no query power and costs a join per read — and no GIN index, because those payloads are never filtered on. An event table would be ~100× bigger than one row per user per day for the same answers, and the 500 MB database is our tightest resource. |
 | 2026-10-05 | **`profiles` is the one table with RLS enabled but not forced.** FORCE would make the owner subject to RLS, breaking both the signup bootstrap trigger (GoTrue has no `auth.uid()` yet) and `is_admin()`, which is SECURITY DEFINER and so runs as the owner. `anon`/`authenticated` stay fully restricted; only the owner is exempt, and the owner can already `alter table` anything. Everything else is forced. |
 | 2026-10-05 | **SECURITY DEFINER helpers live in a `private` schema, never `public`.** PostgREST only serves `public`, so `public.is_admin()` was RPC-callable by anyone holding the anon key — and revoking from `anon` alone does nothing, because **PostgreSQL grants EXECUTE to `PUBLIC` by default** and `anon` inherits it. Moving all three to `private` cleared both advisor lints (now 0 findings). Verified with a probe that PostgreSQL checks EXECUTE at trigger *creation*, not fire time, so revoking cannot break sign-up. |
 | 2026-10-05 | **`updated_at` is set by a database trigger, not trusted from the client** — `conversations_ws_time_idx` orders the conversation list by it, so an un-stamped row would strand a chat at the bottom forever. |
+| 2026-10-05 | **Originals go to R2, and Free keeps them.** The user enabled R2 ("you can use r2 i guess for storage, why bloat supabase"), so the backend moved off Supabase Storage; the bucket is reached by the `env.BUCKET` binding, which means one account, one deploy, and no CORS or public URL. **"Free stores text only" is dropped** — it existed to spare metered Storage egress, R2 does not charge egress, and the pricing table advertises 50 MB on Free anyway. Storage is now metered per plan against `plans.storage_mb` (413 on overflow, read fail-open). Extraction stays in the **browser**: pdf.js and mammoth are multi-MB and DOM-bearing and a Worker request has a CPU budget in milliseconds. §3.3. |
 
 ---
 

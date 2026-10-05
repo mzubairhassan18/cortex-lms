@@ -30,6 +30,19 @@
     "binding": "ASSETS",
     "run_worker_first": ["/api/*"]
   },
+  // File originals (P2 storage). The extracted TEXT goes in Postgres on the
+  // `files` row — API reads are unmetered and the text is what the prompt
+  // actually needs — while the original bytes come here, so a 5 MB PDF costs
+  // R2 storage instead of a database row. Same account as the Worker: one
+  // deploy, one runtime, no second secret surface, and the bucket is reached
+  // by binding rather than over the network, so there is no CORS to configure
+  // and no public URL for somebody to guess.
+  "r2_buckets": [
+    {
+      "bucket_name": "cortex-files",
+      "binding": "BUCKET"
+    }
+  ],
   "vars": {
     // Both values are already published in public/js/auth.js — the key is the
     // *publishable* one, not the service role. Passing it alongside the
