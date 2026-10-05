@@ -719,6 +719,45 @@ P3 — SHIP
           https://cortex.mzubairhassan18.workers.dev/** or Google sign-in
           dies on this host, and it cannot be read or written by any MCP tool.
 
+[x] P3.5  2026-10-05 WORKER API SHIPPED — the 25 fetch('/api/...') call sites
+          finally have something to talk to. wrangler.jsonc gained main=
+          worker/index.js, assets.binding=ASSETS and run_worker_first:
+          ["/api/*"]; deployed as version 772e6f3c (38.5 KiB bundle).
+          Unauthenticated checks: /api/conversations, /api/workspaces,
+          /api/settings, /api/models and POST /api/chat all return
+          401 {"error":"Sign in first."} instead of 404; GET /api/files -> 200
+          []; static / and /pricing -> 200; /app -> 307 -> 200.
+          Ported: conversations CRUD INCLUDING SOFT DELETE (the `archived`
+          flag is conversations.deleted.json) and /api/deleted/:id/restore
+          with re-homing of an orphaned workspace; workspaces CRUD with both
+          409 guards (last workspace / still holds conversations unless
+          ?force=1, and force archives rather than drops); settings, connect
+          and models over the caller's OWN profiles row — v1 had a single
+          shared settings.json, so on a public host two visitors would have
+          shared one provider config and one API key; POST /api/chat as an SSE
+          proxy keeping the delta/route/error/done contract, with first-byte
+          and idle-gap timeouts and the one-retry rule.
+          NOT ported: file Storage -> 501 with an honest message.
+          GET /api/files -> [] is the truth, not a stub: v1 kept uploads on
+          local disk so nothing has ever been stored server-side.
+          Security shape: NO service role key anywhere in the Worker. It
+          forwards the caller's own Authorization header to PostgREST, so the
+          database authenticates as that user and RLS (user_id = auth.uid())
+          does the scoping — a handler that forgets a WHERE is still refused.
+          Supporting migration: user_id SET DEFAULT auth.uid() on
+          conversations + workspaces (column is NOT NULL, had no default).
+          Auto probe cache keyed by user id: a module-level cache would serve
+          one user's probe — built from their saved keys — to another user,
+          because a Worker isolate is shared by every request it holds.
+          BUG CAUGHT BEFORE DEPLOY: AUTO_ORDER read 'anthic' not 'anthropic'.
+          Unknown ids resolve to null inside buildAutoRoutes and are filtered
+          out with no error, so the typo would have silently removed
+          Anthropic from Auto mode forever.
+          NEXT: user adds https://cortex.mzubairhassan18.workers.dev/** to
+          Supabase Auth -> URL Configuration -> Redirect URLs, signs in, and
+          sends a message. The authenticated path cannot be verified by the
+          agent — no service role key is available to mint a token.
+
 OPEN QUESTIONS (see PLAN.md section 7)
 --------------------------------------
 [x] Q1  2026-10-03 Graph: build in Preact+SVG, or migrate to React for React

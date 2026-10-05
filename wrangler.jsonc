@@ -1,27 +1,42 @@
 {
-  // Cloudflare Workers Static Assets — the host for the assembled site.
+  // Cloudflare Workers Static Assets — static site plus the API, one deploy.
   //
   // Cloudflare's own guidance: "If you are starting a new project, use Workers
   // instead of Pages." Pages still works, but it now delegates to Workers and
   // the delegation failed on first contact here (`wrangler pages project
   // create` -> "Missing entry-point to Worker script or to assets directory").
   //
-  // Purely static for now: no `main`, because assets.directory alone is enough.
-  // When the 25 `fetch('/api/...')` call sites get a home, this file gains a
-  // `main` plus the ASSETS binding, and the same deploy serves both the files
-  // and the API — see PLAN.md section 4.
+  // Routing (documented behavior):
+  //   - a URL matching a file in `directory` is served WITHOUT running the Worker
+  //   - `run_worker_first` sends /api/* to the Worker before the asset lookup,
+  //     so the API is never shadowed by a file of a similar name
+  //   - everything else that misses falls through to the Worker, which answers
+  //     it with `env.ASSETS.fetch(request)`
   //
-  // `directory` points at the assembled output, which is built with a root
-  // base for this host:
+  // `binding` is only valid because there is now a `main`.
   //
-  //   node scripts/assemble.mjs --base /     <- root, because *.workers.dev
-  //   node scripts/assemble.mjs              <- /cortex-lms/, for GitHub Pages
+  // Build before deploying — Cloudflare uploads what is on disk, it does not
+  // build. The base must match this host, which serves at the root:
   //
-  // Cloudflare uploads what is on disk; it does not build. So assemble first,
-  // then `wrangler deploy`.
+  //   node scripts/assemble.mjs --base /     <- root (*.workers.dev)
+  //   node scripts/assemble.mjs              <- /cortex-lms/, GitHub Pages
+  //   wrangler deploy
+  //
   "name": "cortex",
+  "main": "worker/index.js",
   "compatibility_date": "2026-10-05",
   "assets": {
-    "directory": "./out"
+    "directory": "./out",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    // Both values are already published in public/js/auth.js — the key is the
+    // *publishable* one, not the service role. Passing it alongside the
+    // caller's own Authorization header is what keeps RLS in force: PostgREST
+    // then sees the `authenticated` role and auth.uid() resolves, so every
+    // query is scoped to the signed-in user by policy rather than by code.
+    "SUPABASE_URL": "https://agyxcfnfvggpbhzyhrsj.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_woXb6y4EzUGKIcrn_rgm1Q_sf53LpBy"
   }
 }

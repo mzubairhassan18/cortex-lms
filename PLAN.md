@@ -638,8 +638,8 @@ User chose option A below (2026-10-04), tiers and storage as proposed.
 
 1. **The BYOK proxy must run somewhere.** Browsers cannot call OpenAI/Anthropic
    directly (no CORS headers), so `server.js`'s streaming proxy has to move
-   into a **Supabase Edge Function** (Deno). This is §3.2's constraint B.
-   *Still open — P2.11.*
+   into a server. ~~Supabase Edge Function~~ **Shipped 2026-10-05 as a
+   Cloudflare Worker — see below.**
 2. ~~**Sub-path URLs.**~~ **Resolved 2026-10-05 (commit `5c77310`).** Asset URLs
    are `./`-relative in the HTML, and `js/base.js` derives the deploy base from
    its own module URL — unlike `location.pathname`, a module URL has an
@@ -693,23 +693,59 @@ features and optimizations are focused on Workers"*, and `wrangler pages
 project create` demonstrates it by delegating to Workers and failing with
 *"Missing entry-point to Worker script or to assets directory"*.
 
-Deployed from `wrangler.jsonc` with `assets.directory = ./out` and **no Worker
-script yet**:
+Deployed from `wrangler.jsonc` with `assets.directory = ./out`:
 
     https://cortex.mzubairhassan18.workers.dev
       10/10 routes 200 · 0 console errors · gate → /login?next=%2Fapp · CF cache HIT
 
 `scripts/assemble.mjs` gained `--base`, because the deploy base belongs to the
 host and not to the code: `--base /` for root hosts (Cloudflare, Netlify),
-default `/cortex-lms/` for GitHub Pages, which stays up as a mirror. Adding a
-`main` plus the `ASSETS` binding to `wrangler.jsonc` is what turns this into
-static **and** API from a single deploy — that is where the 25 call sites go.
+default `/cortex-lms/` for GitHub Pages, which stays up as a mirror.
 
-**Hosting's remaining work is blocker 1 (the API — either that Worker `main`
-or the Supabase Edge Function) and, once Actions is usable again, the
-heartbeat cron — also restorable from `a7ed08c`.** Until then the project's own
-authenticated use stands in for the heartbeat. Local development is unaffected
-either way.
+**THE API SHIPPED 2026-10-05 — hosting's blocker 1 is closed.**
+`wrangler.jsonc` now carries `main = "worker/index.js"`, `assets.binding =
+"ASSETS"` and `run_worker_first: ["/api/*"]`: a URL matching a file is served
+without waking the Worker, `/api/*` is guaranteed to reach it, and everything
+else falls through to `env.ASSETS.fetch(request)`. One deploy serves the site
+*and* the API — which is also why the client needed **no change at all**: the
+25 call sites already fetch same-origin `/api/...`.
+
+| Route | Storage | Notes |
+| ----- | ------- | ----- |
+| `GET/POST/PUT/DELETE /api/conversations[/:id]` | `conversations` | DELETE **archives**, never destroys |
+| `POST /api/deleted/:id/restore` | `conversations` | clears the flag; re-homes an orphan first |
+| `GET/POST/PUT/DELETE /api/workspaces[/:id]` | `workspaces` | 409 on the last one, or on one holding conversations unless `?force=1` |
+| `GET/PUT /api/settings`, `POST /api/settings/connect` | `profiles` | one row per user — v1 had one shared file |
+| `GET /api/models` | provider, live | `auto` short-circuits to `{name:'auto'}` |
+| `POST /api/chat` | — | SSE proxy, unchanged `delta`/`route`/`error`/`done` contract |
+| `GET /api/files` | — | `[]` — v1 kept uploads on local disk, so nothing has ever been stored |
+| `.../files[...]` | — | **501** — Storage is the one piece not ported |
+
+**Why a Worker rather than the Supabase Edge Function the table chose:** the
+Edge route meant a second deploy target, a second runtime and a second secret
+surface to do work Cloudflare was already doing — it already had the static
+assets and already accepted the POSTs GitHub Pages refused. One deploy, one
+runtime.
+
+**The property worth keeping:** the Worker never holds the service role key.
+It forwards the caller's own `Authorization` header to PostgREST, so the
+database authenticates as *that user*, `auth.uid()` resolves, and the P2.1
+policies (`user_id = auth.uid()`) do the scoping. The Worker is a translator,
+not a trust boundary — a handler that forgets a `WHERE` still gets refused.
+Two decisions fell out of that:
+
+- `user_id` gained `DEFAULT auth.uid()` on `conversations` and `workspaces`.
+  The column is `NOT NULL` with no default, so an INSERT had to supply it; this
+  way it is always the caller, and RLS `with check` verifies it anyway.
+- The Auto source-probe cache is keyed by user id rather than held in a module
+  variable. A Worker isolate is shared by every request it serves, so a
+  module-level `autoProbe` would have handed one user's probe — built with
+  *their* saved keys — to another user's Auto call.
+
+**Hosting's remaining work is the heartbeat cron, restorable from `a7ed08c`
+once Actions is usable again, plus file Storage for the 501s above.** Until
+then the project's own authenticated use stands in for the heartbeat. Local
+development is unaffected either way.
 
 ---
 
