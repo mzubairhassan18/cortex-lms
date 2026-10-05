@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cortex — learn without losing the thread</title>
+  <meta name="description" content="Cortex keeps every explanation beside the question that started it. Notes, a session summary and a quiz live in the same place — and they're still there next time.">
+  <link rel="icon" type="image/svg+xml" href="/cortex-lms/icon.svg">
+  <link rel="stylesheet" href="/cortex-lms/landing.css">
+  <script>
+    /* Same key and same no-flash trick as the app, so the two never disagree. */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('lb.theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      }
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+</head>
+<body>
+
+<header class="nav">
+  <a class="brand" href="/cortex-lms/"><span class="brand-mark">🧠</span> Cortex</a>
+  <nav class="nav-links">
+    <a href="#problem">Why</a>
+    <a href="#features">Features</a>
+    <a href="#how">How it works</a>
+    <a href="#fine-print">The fine print</a>
+  </nav>
+  <a class="btn btn-ghost" href="/cortex-lms/login">Sign in</a>
+</header>
+
+<main>
+
+  <!-- ───────────── hero ───────────── -->
+  <section class="hero">
+    <p class="eyebrow">A workspace for learning one topic properly</p>
+    <h1>Learn a topic without<br>ever losing the thread.</h1>
+    <p class="lede">
+      Ask a question, then select the sentence that didn't land — Cortex opens the
+      explanation <em>beside</em> the chat instead of above it. Your notes, session
+      summary and quiz live in the same screen, and they're still there next time.
+    </p>
+
+    <div class="cta">
+      <a class="btn btn-primary" href="/cortex-lms/signup">Start learning <span aria-hidden="true">→</span></a>
+      <a class="btn btn-link" href="#how">See how it works</a>
+    </div>
+
+    <ul class="hero-facts">
+      <li>Free tier, no card</li>
+      <li>Free models included</li>
+      <li>Runs on your own machine</li>
+    </ul>
+  </section>
+
+  <!-- ───────────── problem ───────────── -->
+  <section id="problem" class="band">
+    <div class="band-head">
+      <p class="eyebrow">The problem</p>
+      <h2>Learning in a chat window is a scroll of forgetting.</h2>
+      <p class="band-sub">
+        The tools we use to ask questions were built for one-off answers, not for
+        understanding something over a week. So you re-read, re-ask and re-scroll —
+        and the tab count grows while the understanding doesn't.
+      </p>
+    </div>
+
+    <div class="cards">
+      <article class="card">
+        <span class="card-glyph" aria-hidden="true">↑</span>
+        <h3>The good answer is twelve messages up</h3>
+        <p>
+          You get a reply that finally makes sense. Then twelve more messages bury
+          it, and going back for it costs you the thought you were holding.
+        </p>
+      </article>
+      <article class="card">
+        <span class="card-glyph" aria-hidden="true">✎</span>
+        <h3>Your notes live somewhere else</h3>
+        <p>
+          The useful sentence ends up in a doc or a sticky note, detached from the
+          conversation it came from. Later, neither the note nor the chat makes
+          sense on its own.
+        </p>
+      </article>
+      <article class="card">
+        <span class="card-glyph" aria-hidden="true">?</span>
+        <h3>Nothing checks whether it stuck</h3>
+        <p>
+          You read it and felt good about it. A week later you can't reproduce the
+          idea — and there was never a moment that would have told you.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ───────────── features ───────────── -->
+  <section id="features" class="band band-alt">
+    <div class="band-head">
+      <p class="eyebrow">What Cortex does</p>
+      <h2>The whole topic, on one screen.</h2>
+      <p class="band-sub">
+        Every feature below is a direct answer to one of those three problems —
+        which is why they all live in the same place.
+      </p>
+    </div>
+
+    <div class="features">
+      <article class="feature">
+        <h3>Explain beside the question</h3>
+        <p class="why"><strong>So the answer stops scrolling away.</strong></p>
+        <p>
+          Select any sentence and press Explain. It opens in its own panel next to
+          the conversation, with its own thread — ask follow-ups there without
+          derailing the main chat.
+        </p>
+      </article>
+
+      <article class="feature">
+        <h3>A graph of what you learned</h3>
+        <p class="why"><strong>So you can see the shape of a topic.</strong></p>
+        <p>
+          Switch to the graph view: your conversations and every explanation branch
+          out as a horizontal tree. Zoom it, drag around it, and watch the subject
+          spread out instead of vanishing into a scroll bar.
+        </p>
+      </article>
+
+      <article class="feature">
+        <h3>Notes that keep their source</h3>
+        <p class="why"><strong>So a note still means something later.</strong></p>
+        <p>
+          Save a passage from any conversation. The session summary gathers your
+          topics and notes in one place, so you can review a subject without
+          re-reading the chat.
+        </p>
+      </article>
+
+      <article class="feature">
+        <h3>Quizzes from your own conversation</h3>
+        <p class="why"><strong>So "I understood it" becomes provable.</strong></p>
+        <p>
+          Cortex writes questions from what <em>you</em> actually discussed — not a
+          generic question bank — and shows which parts didn't land, so you know
+          what to re-open.
+        </p>
+      </article>
+
+      <article class="feature">
+        <h3>It remembers</h3>
+        <p class="why"><strong>So picking up is instant.</strong></p>
+        <p>
+          Conversations, explanations, notes and test results persist between
+          sessions. Close the lid tonight, open it tomorrow, carry on mid-thought.
+        </p>
+      </article>
+
+      <article class="feature">
+        <h3>Free models, or bring your own key</h3>
+        <p class="why"><strong>So starting costs nothing.</strong></p>
+        <p>
+          Begin on free keyless models with no sign-up. When you want more, add an
+          OpenAI-compatible key of your own — it stays on your server and is never
+          shared with anyone else.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ───────────── how it works ───────────── -->
+  <section id="how" class="band">
+    <div class="band-head">
+      <p class="eyebrow">How it works</p>
+      <h2>Three moves, on repeat.</h2>
+    </div>
+
+    <ol class="steps">
+      <li class="step">
+        <span class="step-n">1</span>
+        <div>
+          <h3>Ask</h3>
+          <p>
+            Chat like you already do. Attach a PDF, a Word file or a link and it
+            becomes part of that conversation's context.
+          </p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="step-n">2</span>
+        <div>
+          <h3>Explain</h3>
+          <p>
+            Highlight whatever didn't land and open it beside the chat. Branch it
+            again if you need to — explanations nest, and the tree stays tidy.
+          </p>
+        </div>
+      </li>
+      <li class="step">
+        <span class="step-n">3</span>
+        <div>
+          <h3>Prove it</h3>
+          <p>
+            Read the summary, skim your notes, take the quiz. Anything you missed
+            points straight back at the explanation that will fix it.
+          </p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ───────────── the fine print (product-truth proof) ───────────── -->
+  <section id="fine-print" class="band band-alt">
+    <div class="band-head">
+      <p class="eyebrow">The fine print, up front</p>
+      <h2>What's actually true about it.</h2>
+      <p class="band-sub">
+        No testimonials and no user counts — this is a new product, and inventing
+        social proof would be the first lie you read. Here is what you can check
+        instead.
+      </p>
+    </div>
+
+    <ul class="truth">
+      <li><strong>No account to start.</strong> Open it and ask something.</li>
+      <li><strong>No subscription.</strong> The product itself is free to run.</li>
+      <li><strong>Bring your own key.</strong> Your API key stays on your own server and is used only for your requests.</li>
+      <li><strong>Free models are built in.</strong> You can learn an entire topic without paying anyone anything.</li>
+      <li><strong>Your data is yours.</strong> Conversations, notes and files are stored where you installed it.</li>
+      <li><strong>It runs locally.</strong> One command, your own machine, no cloud lock-in.</li>
+    </ul>
+
+    <div class="cta cta-center">
+      <a class="btn btn-primary" href="/cortex-lms/signup">Open Cortex <span aria-hidden="true">→</span></a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <p class="foot-brand">🧠 Cortex</p>
+  <p class="foot-note">A local-first learning workspace — chat, explanations, notes, summaries and quizzes in one place.</p>
+  <p class="foot-links">
+    <a href="/cortex-lms/login">Open the app</a>
+    <span aria-hidden="true">·</span>
+    <a href="#problem">Why Cortex</a>
+    <span aria-hidden="true">·</span>
+    <a href="#features">Features</a>
+  </p>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<!-- data-boot: the boot overlay below is up from the very first paint until
+     js/main.js finishes init(). Removing this attribute by hand reveals the UI. -->
+<html lang="en" data-boot>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cortex</title>
+  <link rel="icon" type="image/svg+xml" href="/cortex-lms/icon.svg">
+  <link rel="stylesheet" href="/cortex-lms/style.css">
+  <link rel="stylesheet" href="/cortex-lms/graph.css">
+  <script>
+    /* Set the theme before the stylesheet paints so there is no flash of the
+     * wrong colours. Mirrored by js/theme.js — keep the storage key in sync. */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('lb.theme'); } catch (e) { /* private mode */ }
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+          ? 'light' : 'dark';
+      }
+      document.documentElement.setAttribute('data-theme', t);
+
+      /* Boot-overlay watchdog, mirrored by endBoot() in js/main.js — keep the
+       * attribute name in sync. If boot never completes (a module failed to
+       * load, a fetch hangs), reveal the app anyway instead of leaving the
+       * loader up forever. */
+      setTimeout(function () {
+        document.documentElement.removeAttribute('data-boot');
+      }, 8000);
+    })();
+  </script>
+</head>
+<body>
+  <!--
+    One icon system for every control: 24x24 line icons, single weight, drawn
+    in currentColor so they inherit each button's colour in both themes.
+    Replaces the mixed emoji/typographic glyphs (☰ 🗺 🌙 💡 ⌄ ✕ …) that used to
+    sit on buttons, which never quite matched each other. Usage:
+        <svg class="ico" aria-hidden="true"><use href="#i-name"></use></svg>
+    Styling lives on .ico in style.css (width/height = 1em, so it tracks the
+    surrounding font-size).
+  -->
+  <svg id="ico-sprite" aria-hidden="true" focusable="false" style="display:none">
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4 3 6.5v14L9 18l6 2.5 6-2.5v-14L15 6.5 9 4zM9 4v14M15 6.5v14"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M21.5 12h-2.2M4.7 12H2.5M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6M18.7 18.7l-1.6-1.6M6.9 6.9 5.3 5.3"/></symbol>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5.5 5.5 0 0 0 18 7 6 6 0 0 0 6 7c0 1 .2 2.2 1.5 3 .8.8 1.3 1.5 1.5 2.5M9 18h6M10 21.5h4"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><path d="M9 4.5h6v3H9zM9 6H6a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-11A1.5 1.5 0 0 0 18 6h-3M8.5 12h7M8.5 15.5h4.5"/></symbol>
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 4.5h4.5v15H4zM9.5 4.5H14v15H9.5zM15.6 5.4l3.9.9-2.2 13.4-3.9-.9z"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 3v2.5M6 8h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM2 12.5h2M20 12.5h2M9.5 12.5h.01M14.5 12.5h.01M9 18v2M15 18v2"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.5 13.5a4.5 4.5 0 0 0 6.4 0l2.6-2.6a4.5 4.5 0 0 0-6.4-6.4l-1.4 1.4M13.5 10.5a4.5 4.5 0 0 0-6.4 0l-2.6 2.6a4.5 4.5 0 1 0 6.4 6.4l1.4-1.4"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5.5 12h13"/></symbol>
+    <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="M6.5 9.5 12 15l5.5-5.5"/></symbol>
+    <symbol id="i-chev-up" viewBox="0 0 24 24"><path d="M6.5 14.5 12 9l5.5 5.5"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M20.5 11.5a7.5 7.5 0 0 1-7.5 7.5H7.8L3.5 21.5V11.5a7.5 7.5 0 0 1 7.5-7.5h2a7.5 7.5 0 0 1 7.5 7.5z"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8A1.5 1.5 0 0 1 20.5 10v8A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z"/></symbol>
+    <symbol id="i-graph" viewBox="0 0 24 24"><circle cx="5.5" cy="7" r="2.4"/><circle cx="18.5" cy="6" r="2.4"/><circle cx="17" cy="18" r="2.4"/><path d="M7.8 7.2l8.4-1M7.2 8.9l8.3 7.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1M20.5 4v4.5H16"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4v4.5H8"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h13M13 7l5 5-5 5"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19.5V6.5M6.6 11.6 12 6.2l5.4 5.4"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L19.6 8.4a2.1 2.1 0 0 0-3-3L5 17v3z"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h9.5A1.5 1.5 0 0 1 20 10.5V20a1.5 1.5 0 0 1-1.5 1.5H9A1.5 1.5 0 0 1 7.5 20v-9.5A1.5 1.5 0 0 1 9 9zM4.5 15A1.5 1.5 0 0 1 3 13.5V4A1.5 1.5 0 0 1 4.5 2.5H14A1.5 1.5 0 0 1 15.5 4v1"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19.5 7"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21v-6M8.5 3h7l-1 5 3 3.5H6.5L9.5 8z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M15.5 15.5 20.5 20.5"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M4.5 7h15M4.5 12h15M4.5 17h15"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.8 12a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4L17.5 7M10 11v5.5M14 11v5.5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15"/></symbol>
+  </svg>
+
+  <!--
+    Boot overlay — the ONLY thing painted until init() finishes.
+
+    It is markup, not injected JS, and it sits in <html data-boot>, so it is on
+    screen from the first frame. Without it the list layout paints for half a
+    second before the remembered graph view takes over, which reads as a
+    flicker on every reload.
+
+    States, all driven off the data-boot attribute set in <head>:
+        [data-boot]          opaque splash, #app / #ws-page are invisible
+        [data-boot='out']    app revealed underneath, splash fading out
+        (attribute gone)     #boot is display:none — the app owns the screen
+  -->
+  <div id="boot">
+    <div class="boot-in">
+      <svg class="ico boot-mark" aria-hidden="true"><use href="#i-graph"></use></svg>
+      <span class="boot-name">Cortex</span>
+      <span class="boot-bar" aria-hidden="true"><i></i></span>
+      <span class="boot-hint">Loading your workspace…</span>
+    </div>
+  </div>
+
+  <div id="app">
+
+    <!-- Top toolbar: full width so controls never crowd when the chat shrinks -->
+    <div id="top-bar">
+      <button id="left-toggle" title="Toggle conversation list"><svg class="ico" aria-hidden="true"><use href="#i-menu"></use></svg></button>
+      <span id="current-title">New conversation</span>
+      <button id="view-toggle" title="Switch between list view and graph view"><svg class="ico" aria-hidden="true"><use href="#i-map"></use></svg><span class="btn-label"> Graph</span></button>
+      <button id="theme-toggle" title="Switch between dark and light theme"><svg class="ico" aria-hidden="true"><use href="#i-moon"></use></svg></button>
+      <button id="explains-toggle" class="hidden" title="Show explain windows"><svg class="ico" aria-hidden="true"><use href="#i-bulb"></use></svg> <span class="btn-label">Explains</span> <span id="explains-count">0</span></button>
+      <button id="summary-btn" title="Topics summary of this conversation"><svg class="ico" aria-hidden="true"><use href="#i-clipboard"></use></svg><span class="btn-label"> Summary</span></button>
+      <button id="library-btn" title="Library — every file you uploaded"><svg class="ico" aria-hidden="true"><use href="#i-library"></use></svg><span class="btn-label"> Library</span></button>
+      <div id="model-wrap" title="Model">
+        <span id="model-icon"><svg class="ico" aria-hidden="true"><use href="#i-bot"></use></svg></span>
+        <select id="model-select" title="Model"></select>
+      </div>
+    </div>
+
+    <div id="main-row">
+
+    <!-- Left sidebar: conversation history -->
+    <aside id="left-sidebar">
+      <div class="left-header">
+        <span class="logo"><svg class="ico" aria-hidden="true"><use href="#i-graph"></use></svg> Cortex</span>
+      </div>
+      <!--
+        Workspace switcher — the ONLY way to reach workspaces from list view.
+        In graph view you zoom past 50% instead; this is that same action, one
+        click away, without leaving the list.
+      -->
+      <div id="ws-switch-wrap">
+        <button type="button" id="ws-switch" aria-haspopup="menu" aria-expanded="false" aria-controls="ws-menu" title="Switch workspace">
+          <span id="ws-switch-name">Workspaces</span>
+          <svg class="ico" aria-hidden="true"><use href="#i-chev-down"></use></svg>
+        </button>
+        <div id="ws-menu" class="hidden" role="menu"></div>
+      </div>
+      <button id="new-chat-btn"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg> New Chat</button>
+      <div id="conversation-list"></div>
+      <!-- Static footer: active provider/model + settings entry -->
+      <div id="sidebar-footer">
+        <div id="footer-model" title="Active provider and model">…</div>
+        <div id="footer-info" hidden title="Context window and usage limits"></div>
+        <button id="settings-btn" title="Provider & API settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"></use></svg> Settings</button>
+      </div>
+    </aside>
+
+    <!-- Main chat area -->
+    <main id="chat-area">
+      <div id="messages"></div>
+
+      <form id="input-form">
+        <div id="attach-chips" hidden></div>
+        <button type="button" id="attach-btn" title="Attach a file — or drag &amp; drop onto the input"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+        <button type="button" id="link-btn" title="Attach a link"><svg class="ico" aria-hidden="true"><use href="#i-link"></use></svg></button>
+        <textarea id="input" rows="1" placeholder="Ask anything...  (Enter to send, Shift+Enter for new line)"></textarea>
+        <button type="submit" id="send-btn" title="Send">
+          <svg class="send-idle" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 19V6.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+            <path d="M6.6 11.6 12 6.2l5.4 5.4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="send-busy" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        </button>
+      </form>
+      <input type="file" id="file-input" multiple hidden
+             accept=".pdf,.docx,.txt,.md,.markdown,.csv,.tsv,.json,.html,.htm,.log,.xml,.yml,.yaml">
+    </main>
+
+    <!-- Drag handle to resize the explain sidebar -->
+    <div id="resize-handle"></div>
+
+    <!-- Right sidebar: explainer containers (recursive vertical splits) -->
+    <aside id="right-sidebar">
+      <div id="sidebar-header">
+        <div id="explain-tabs" title="Root explainer containers (created from the main chat)"></div>
+        <div class="sidebar-actions">
+          <button id="sidebar-reset" title="Clear this container's conversation"><svg class="ico" aria-hidden="true"><use href="#i-undo"></use></svg></button>
+          <button id="sidebar-close" title="Hide panel (containers are kept)"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
+        </div>
+      </div>
+      <div id="explainer-body">
+        <div id="explain-panels"></div>
+        <div id="summary-overlay" class="hidden">
+          <div class="summary-head">
+            <span class="summary-title"><svg class="ico" aria-hidden="true"><use href="#i-clipboard"></use></svg> Topics — what I've learned</span>
+            <span id="summary-status"></span>
+            <span id="test-badges" title="Tests taken"></span>
+            <button id="summary-refresh" title="Regenerate summary & test now"><svg class="ico" aria-hidden="true"><use href="#i-refresh"></use></svg></button>
+            <div class="sum-export" id="sum-export">
+              <button
+                type="button"
+                id="summary-export"
+                title="Export this summary"
+                aria-haspopup="true"
+                aria-expanded="false"
+                aria-controls="export-menu"
+              ><svg class="ico" aria-hidden="true"><use href="#i-download"></use></svg></button>
+              <div class="export-menu hidden" id="export-menu" role="menu">
+                <button type="button" role="menuitem" data-fmt="pdf">
+                  <span class="em-label">PDF document</span><span class="em-ext">.pdf</span>
+                </button>
+                <button type="button" role="menuitem" data-fmt="docx">
+                  <span class="em-label">Word document</span><span class="em-ext">.docx</span>
+                </button>
+                <button type="button" role="menuitem" data-fmt="txt">
+                  <span class="em-label">Plain text</span><span class="em-ext">.txt</span>
+                </button>
+              </div>
+            </div>
+            <button id="summary-close" title="Close (containers stay)" class="summary-x"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
+          </div>
+          <div id="summary-body">
+            <div id="summary-card-slot"></div>
+            <div id="test-section"></div>
+          </div>
+        </div>
+        <div id="settings-overlay" class="hidden">
+          <div class="summary-head">
+            <span class="summary-title"><svg class="ico" aria-hidden="true"><use href="#i-gear"></use></svg> Settings</span>
+            <span id="settings-status"></span>
+            <button id="settings-close" title="Close (containers stay)" class="summary-x"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
+          </div>
+          <div id="settings-body">
+            <label class="set-label" for="set-provider">Model provider</label>
+            <select id="set-provider"></select>
+
+            <div id="set-key-row">
+              <label class="set-label" for="set-key">API key</label>
+              <input id="set-key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
+            </div>
+
+            <div id="set-base-row">
+              <label class="set-label" for="set-base">Base URL <span class="set-inline-hint">(optional — OpenAI-compatible endpoints)</span></label>
+              <input id="set-base" type="text" placeholder="https://api.openai.com/v1" spellcheck="false">
+            </div>
+
+            <div class="set-actions">
+              <button id="set-connect">Connect</button>
+            </div>
+            <div id="set-message" class="set-message"></div>
+          </div>
+        </div>
+        <div id="library-overlay" class="hidden">
+          <div class="summary-head">
+            <span class="summary-title"><svg class="ico" aria-hidden="true"><use href="#i-library"></use></svg> Library — every file</span>
+            <span id="library-status"></span>
+            <button id="library-close" title="Close" class="summary-x"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
+          </div>
+          <div id="library-body"></div>
+        </div>
+      </div>
+    </aside>
+
+    <section id="graph-view" class="hidden" aria-label="Graph view">
+      <div id="graph-scroll">
+        <!-- #graph-canvas carries the CAMERA: JS writes translate(x,y) scale(k)
+             onto it, so the board can be dragged past every edge — an infinite
+             canvas like Figma, not a scroll box with sides you can hit. -->
+        <div id="graph-canvas">
+          <svg id="graph-edges" aria-hidden="true">
+            <defs>
+              <marker id="garrow" viewBox="0 0 10 10" refX="8.5" refY="5"
+                      markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 Z"/>
+              </marker>
+              <marker id="garrow-on" viewBox="0 0 10 10" refX="8.5" refY="5"
+                      markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 Z"/>
+              </marker>
+            </defs>
+            <g id="graph-paths"></g>
+          </svg>
+          <div id="graph-nodes"></div>
+        </div><!-- /#graph-canvas -->
+      </div><!-- /#graph-scroll -->
+      <!-- Zoomed out past ~50%: the conversations give way to the workspaces
+           that hold them. Lives outside #graph-scroll so it never scales. -->
+      <div id="ws-layer" class="hidden" aria-label="Workspaces"></div>
+      <!--
+        Empty workspace. Lives OUTSIDE #graph-canvas on purpose: inside it this
+        would be scaled by the zoom like everything else, so at 30% it would be
+        unreadable. It also stands IN for the composer — with no conversation
+        there is nothing to attach to and nothing to send to, so the input row
+        is suppressed (see `body.graph-mode #main-row > #chat-area`) and one
+        plus button does the job instead.
+      -->
+      <div id="graph-empty" class="hidden">
+        <button type="button" id="graph-empty-add" title="Start the first conversation">
+          <svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg>
+        </button>
+        <b>Start your first conversation</b>
+        <span>Its explanations branch off to the right once you ask.</span>
+      </div>
+      <div id="graph-rail">
+        <button id="rail-zoom-out" title="Zoom out (−)"><svg class="ico" aria-hidden="true"><use href="#i-minus"></use></svg></button>
+        <button id="rail-zoom-label" title="Reset zoom to 100% (0)">100%</button>
+        <button id="rail-zoom-in" title="Zoom in (+)"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+        <button id="rail-settings" title="Provider & API settings"><svg class="ico" aria-hidden="true"><use href="#i-gear"></use></svg></button>
+      </div>
+    </section>
+
+    </div><!-- /#main-row -->
+
+  </div><!-- /#app -->
+
+  <!--
+    Standalone workspace picker, served at /workspaces. main.js branches on the
+    path and boots this instead of the app — no top bar, no sidebar, no chat:
+    just search, a grid/list toggle and the workspace names. Hidden on /app.
+  -->
+  <div id="ws-page" hidden>
+    <a id="ws-page-brand" href="/cortex-lms/app" title="Back to Cortex">
+      <svg class="ico" aria-hidden="true"><use href="#i-graph"></use></svg> Cortex
+    </a>
+
+    <div class="ws-page-inner">
+      <header class="ws-page-head">
+        <h1>Workspaces</h1>
+        <p>Each workspace keeps its own conversations, notes and files. Pick one to open it.</p>
+      </header>
+
+      <div class="ws-page-tools">
+        <label class="ws-page-search" for="ws-page-q">
+          <svg class="ico" aria-hidden="true"><use href="#i-search"></use></svg>
+          <input id="ws-page-q" type="search" placeholder="Search workspaces…" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="ws-page-views" role="group" aria-label="Layout">
+          <button type="button" id="ws-page-grid" class="on" aria-pressed="true" title="Grid view">
+            <svg class="ico" aria-hidden="true"><use href="#i-grid"></use></svg> Grid
+          </button>
+          <button type="button" id="ws-page-list" aria-pressed="false" title="List view">
+            <svg class="ico" aria-hidden="true"><use href="#i-list"></use></svg> List
+          </button>
+        </div>
+      </div>
+
+      <div id="ws-page-body" data-view="grid"></div>
+      <p id="ws-page-empty" class="ws-page-empty" hidden>No workspace matches that search.</p>
+    </div>
+  </div>
+
+  <!-- Floating popup shown when text is selected -->
+  <div id="selection-popup">
+    <button type="button" data-act="explain" title="Explain in a side panel"><svg class="ico" aria-hidden="true"><use href="#i-bulb"></use></svg> Explain</button>
+    <button type="button" data-act="note" title="Save to my notes in the summary"><svg class="ico" aria-hidden="true"><use href="#i-pin"></use></svg> Note</button>
+  </div>
+
+  <!-- Shown next to a container's ✕: closing deletes it permanently. -->
+  <div id="confirm-popup">
+    <div class="confirm-msg"></div>
+    <div class="confirm-actions">
+      <button type="button" class="confirm-cancel">Cancel</button>
+      <button type="button" class="confirm-ok">Delete</button>
+    </div>
+  </div>
+
+  <script src="/cortex-lms/vendor/marked.min.js"></script>
+  <!-- Supabase UMD bundle: a classic script, so it runs before the module
+       graph is fetched and window.supabase is ready when js/auth.js loads. -->
+  <script src="/cortex-lms/vendor/supabase.js"></script>
+  <!--
+    @use-gesture is served unbundled (there is no build step), so its dev guards
+    are still in place: every warning reads `process.env.NODE_ENV`. A bundler
+    would have inlined 'production' there, so define the object it reads instead.
+    Classic script, which means it runs before the module graph is fetched.
+    Nothing else on this page reads `process` — checked.
+  -->
+  <script>window.process = window.process || { env: { NODE_ENV: 'production' } };</script>
+  <!--
+    The canvas gesture layer (@use-gesture: wheel-pan, pinch-zoom, pointer
+    tracking for the Figma-style board). There is deliberately no build step,
+    so the bare specifiers js/graph.js imports are resolved here. The targets
+    are vendored into vendor/use-gesture/ rather than read out of node_modules,
+    because the published site is a folder of static files with no npm install
+    behind it. Every URL in this document is relative for the same reason, so
+    the bytes still resolve when the page is served one level down on the
+    deployed site. Import maps must appear before the first module script.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@use-gesture/vanilla": "/cortex-lms/vendor/use-gesture/vanilla/dist/use-gesture-vanilla.esm.js",
+      "@use-gesture/core": "/cortex-lms/vendor/use-gesture/core/dist/use-gesture-core.esm.js",
+      "@use-gesture/core/actions": "/cortex-lms/vendor/use-gesture/core/actions/dist/use-gesture-core-actions.esm.js",
+      "@use-gesture/core/utils": "/cortex-lms/vendor/use-gesture/core/utils/dist/use-gesture-core-utils.esm.js",
+      "@use-gesture/core/types": "/cortex-lms/vendor/use-gesture/core/types/dist/use-gesture-core-types.esm.js"
+    }
+  }
+  </script>
+  <script type="module" src="/cortex-lms/js/main.js"></script>
+</body>
+</html>

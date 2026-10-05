@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cortex — pricing</title>
+  <meta name="description" content="Cortex is free for up to 50 questions a day. Pro is $9 a month, Team $29. Pay by bank transfer.">
+  <link rel="icon" type="image/svg+xml" href="/cortex-lms/icon.svg">
+  <link rel="stylesheet" href="/cortex-lms/landing.css">
+  <script>
+    /* Same key and same no-flash trick as the app and the landing page. */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('lb.theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') {
+        t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      }
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <style>
+    /*
+     * Static by design. The same numbers exist in platform_settings.plans as
+     * the runtime source of truth the Edge Function enforces against — but a
+     * pricing page is marketing copy on a static host, where anon has no table
+     * privileges (and must not). If a tier changes, change BOTH this file and
+     * that row.
+     */
+    .price-hero {
+      max-width: 720px; margin: 0 auto; text-align: center;
+      padding: 76px 20px 44px;
+    }
+    .price-hero h1 {
+      font-size: clamp(34px, 5.5vw, 52px); line-height: 1.05;
+      letter-spacing: -0.03em; margin: 14px 0 14px;
+    }
+    .price-hero p { color: var(--text-dim); font-size: 17px; line-height: 1.6; }
+
+    .tiers {
+      max-width: 1040px; margin: 0 auto; padding: 0 20px 24px;
+      display: grid; gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(272px, 1fr));
+      align-items: stretch;
+    }
+    .tier {
+      background: var(--bg-panel); border: 1px solid var(--border);
+      border-radius: 20px; padding: 28px 24px 26px;
+      display: flex; flex-direction: column; gap: 18px;
+      position: relative;
+    }
+    .tier--featured { border-color: var(--accent); box-shadow: 0 30px 70px -40px var(--accent); }
+    .tier-badge {
+      position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+      background: var(--accent); color: var(--on-accent);
+      font-size: 11.5px; font-weight: 700; letter-spacing: .09em;
+      text-transform: uppercase; padding: 5px 13px; border-radius: 999px;
+      white-space: nowrap;
+    }
+    .tier-name { font-size: 15px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-dim); }
+    .tier-price { display: flex; align-items: baseline; gap: 7px; }
+    .tier-price b { font-size: 44px; letter-spacing: -0.035em; font-weight: 800; }
+    .tier-price span { color: var(--text-dim); font-size: 14.5px; }
+    .tier-blurb { color: var(--text-dim); font-size: 14.5px; line-height: 1.55; margin: -6px 0 0; }
+    .tier-limits { list-style: none; margin: 0; padding: 0;
+      display: grid; gap: 11px; font-size: 14.5px; }
+    .tier-limits li { display: flex; gap: 10px; align-items: flex-start; line-height: 1.45; }
+    .tier-limits li::before {
+      content: '✓'; color: var(--accent2); font-weight: 800; flex: none;
+      width: 16px; text-align: center;
+    }
+    .tier-limits li.dim::before { content: '–'; color: var(--text-dim); }
+    .tier-cta { margin-top: auto; }
+    .tier-cta a {
+      display: block; text-align: center; padding: 12px 16px;
+      border-radius: 12px; font-weight: 650; font-size: 15px;
+      text-decoration: none; transition: transform .15s, border-color .15s;
+    }
+    .tier-cta a:hover { transform: translateY(-1px); }
+    .tier-cta a.solid { background: var(--accent); color: var(--on-accent); }
+    .tier-cta a.ghost { border: 1px solid var(--border); color: var(--text); }
+    .tier-cta a.ghost:hover { border-color: var(--accent); }
+
+    .price-section { max-width: 860px; margin: 0 auto; padding: 44px 20px 10px; }
+    .price-section h2 { font-size: 26px; letter-spacing: -0.02em; margin: 0 0 16px; }
+    .price-section h3 { font-size: 17px; margin: 30px 0 8px; }
+    .price-section p, .price-section li { color: var(--text-dim);
+      font-size: 15.5px; line-height: 1.65; }
+    .price-section ul { padding-left: 20px; display: grid; gap: 7px; }
+
+    .pay-card {
+      background: var(--bg-panel); border: 1px solid var(--border);
+      border-radius: 18px; padding: 26px 26px 24px; margin-top: 20px;
+    }
+    .pay-steps { counter-reset: step; list-style: none; padding: 0;
+      display: grid; gap: 15px; margin-top: 16px; }
+    .pay-steps li { counter-increment: step; display: flex; gap: 14px;
+      align-items: flex-start; }
+    .pay-steps li::before {
+      content: counter(step); flex: none; width: 26px; height: 26px;
+      border-radius: 999px; background: var(--bg-raise);
+      border: 1px solid var(--border); color: var(--text);
+      font-size: 13px; font-weight: 700;
+      display: grid; place-items: center;
+    }
+    .price-cta-final {
+      text-align: center; padding: 34px 20px 76px;
+      display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+    }
+  </style>
+</head>
+<body>
+
+<header class="nav">
+  <a class="brand" href="/cortex-lms/"><span class="brand-mark">🧠</span> Cortex</a>
+  <nav class="nav-links">
+    <a href="/cortex-lms/#features">Features</a>
+    <a href="/cortex-lms/pricing">Pricing</a>
+    <a href="/cortex-lms/#faq">FAQ</a>
+  </nav>
+  <div class="nav-cta">
+    <a class="btn btn-ghost" href="/cortex-lms/login">Sign in</a>
+    <a class="btn btn-primary" href="/cortex-lms/signup">Get started</a>
+  </div>
+</header>
+
+<main>
+
+  <section class="price-hero">
+    <p class="eyebrow">Pricing</p>
+    <h1>Free to learn on.<br>Pay only when you outgrow it.</h1>
+    <p>BYOK means the model usage is billed by your own provider key — so what
+      you pay Cortex for is hosting, sync and the workspace, not tokens.
+      No card needed to start.</p>
+  </section>
+
+  <section class="tiers">
+
+    <article class="tier">
+      <div class="tier-name">Free</div>
+      <div class="tier-price"><b>$0</b><span>forever</span></div>
+      <p class="tier-blurb">Everything you need to keep one thread going.</p>
+      <ul class="tier-limits">
+        <li>50 requests a day</li>
+        <li>10 conversations</li>
+        <li>1 workspace</li>
+        <li>50 MB document storage</li>
+        <li>Bring your own model key</li>
+        <li class="dim">Documents stored as extracted text only</li>
+      </ul>
+      <div class="tier-cta">
+        <a class="ghost" href="/cortex-lms/signup?plan=free">Start free</a>
+      </div>
+    </article>
+
+    <article class="tier tier--featured">
+      <div class="tier-badge">Most popular</div>
+      <div class="tier-name">Pro</div>
+      <div class="tier-price"><b>$9</b><span>/ month</span></div>
+      <p class="tier-blurb">For a serious course, or several at once.</p>
+      <ul class="tier-limits">
+        <li>500 requests a day</li>
+        <li>Unlimited conversations</li>
+        <li>10 workspaces</li>
+        <li>1 GB document storage</li>
+        <li>Bring your own model key</li>
+        <li>Original files kept, not just the text</li>
+      </ul>
+      <div class="tier-cta">
+        <a class="solid" href="/cortex-lms/signup?plan=pro">Choose Pro</a>
+      </div>
+    </article>
+
+    <article class="tier">
+      <div class="tier-name">Team</div>
+      <div class="tier-price"><b>$29</b><span>/ month</span></div>
+      <p class="tier-blurb">One bill for a study group or a small class.</p>
+      <ul class="tier-limits">
+        <li>2,000 requests a day, shared across seats</li>
+        <li>Unlimited conversations</li>
+        <li>Unlimited workspaces</li>
+        <li>10 GB document storage</li>
+        <li>10 seats included</li>
+        <li>Original files kept, not just the text</li>
+      </ul>
+      <div class="tier-cta">
+        <a class="ghost" href="/cortex-lms/signup?plan=team">Choose Team</a>
+      </div>
+    </article>
+
+  </section>
+
+  <section class="price-section">
+    <h2>How payment works</h2>
+    <p>Card payments are not switched on yet. Until they are, paid plans are
+      activated by <strong>bank transfer</strong> — the amount moves directly,
+      Cortex never sees your card, and there is no recurring charge you have to
+      remember to cancel.</p>
+
+    <div class="pay-card">
+      <h3 style="margin-top:0">Paying for Pro or Team</h3>
+      <ol class="pay-steps">
+        <li>Pick a plan above and sign in.</li>
+        <li>Transfer the amount to the bank details shown on the payment
+          screen, using your Cortex user ID as the reference.</li>
+        <li>Click <em>I have paid</em> and paste the transfer reference.</li>
+        <li>An administrator matches it against the account and activates your
+          plan — normally the same day.</li>
+      </ol>
+      <p style="margin-top:18px">Your plan stays active until the end of the
+        period you paid for. Nothing auto-renews.</p>
+    </div>
+
+    <h3>What counts as a request?</h3>
+    <p>One message you send to the model. Reading, searching, exporting,
+      graphing and everything offline costs nothing and never counts against
+      your daily limit.</p>
+
+    <h3>Why is my own model key required?</h3>
+    <p>Cortex stores your provider key in your own profile, encrypted at rest,
+      and proxies the call so your browser never has to talk to the provider
+      directly. You pay that provider for tokens; we do not mark them up.</p>
+
+    <h3>What happens if I hit my limit?</h3>
+    <p>The counter resets at midnight UTC. Nothing is deleted — your
+      conversations, notes and summaries stay exactly where they are, and
+      everything offline keeps working while you wait.</p>
+
+    <h3>Can I downgrade?</h3>
+    <p>Yes. Downgrading takes effect at the end of the paid period; the
+      account falls back to the Free limits and nothing is removed. If you are
+      over the Free limits, the oldest conversations stay saved but stop
+      loading until you free up room or upgrade again.</p>
+  </section>
+
+  <div class="price-cta-final">
+    <a class="btn btn-primary" href="/cortex-lms/signup">Create a free account</a>
+    <a class="btn btn-ghost" href="/cortex-lms/login">I already have one</a>
+  </div>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <span class="brand"><span class="brand-mark">🧠</span> Cortex</span>
+    <div class="footer-links">
+      <a href="/cortex-lms/#features">Features</a>
+      <a href="/cortex-lms/pricing">Pricing</a>
+      <a href="/cortex-lms/#faq">FAQ</a>
+      <a href="/cortex-lms/signup">Sign up</a>
+    </div>
+    <p>Free tier, no card required · Bring your own model key</p>
+  </div>
+</footer>
+
+</body>
+</html>
