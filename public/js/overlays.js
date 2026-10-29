@@ -30,7 +30,6 @@ summaryBtn.addEventListener('click', () => {
     setSummaryOverlay(true);
     /* No `force`: in graph mode the summary relocates into a node of its own,
      * so there is nothing to reveal in the sidebar. */
-    if (panelHidden) showSidebar(); // overlay lives over the containers
     showCachedSummary();
     runBackgroundJobs(state.currentId, state.messages, explainSnapshot(), false);
   } else {
