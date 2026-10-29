@@ -615,12 +615,37 @@ body.compact-header #model-select {
 }
 
 .bubble.thinking::after {
-  content: '● ● ●';
-  letter-spacing: 4px;
-  color: var(--text-dim);
-  animation: pulse 1.2s ease-in-out infinite;
+  content: '';
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--intent);
+  animation: ember-breathe 1.4s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
 }
-@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+/* the ember answer is forming: one node breathes — halo via ring shadow,
+   transform+opacity only (compositor work), no synced bullet text */
+@keyframes ember-breathe {
+  0%, 100% { transform: scale(0.7); opacity: 0.45; box-shadow: 0 0 0 0 transparent; }
+  50%      { transform: scale(1); opacity: 1; box-shadow: 0 0 0 6px var(--intent-soft); }
+}
+
+/* cursor lamp over assistant reply text: a soft light pool follows the
+   pointer (--mx/--my set by js/lamp.js). It dies under reduced-motion
+   collapse (opacity lands on 0 base). Chat reading stream only — explain
+   panels reuse .bubble markup, so scope to #chat-area to keep them quiet. */
+#chat-area .msg.assistant .bubble { position: relative; }
+#chat-area .msg.assistant .bubble:not(.thinking)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--t-fast);
+  background: radial-gradient(120px 90px at var(--mx, 50%) var(--my, 50%), var(--lamp), transparent 68%);
+}
+#chat-area .msg.assistant .bubble:hover::after { opacity: 1; }
 
 /* Markdown inside bubbles */
 .bubble pre {
