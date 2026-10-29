@@ -216,8 +216,11 @@ html[data-boot='out'] #boot { opacity: 0; pointer-events: none; }
   stroke-linejoin: round;
   flex: none;
 }
-/* A lone icon that lost its text still needs to look centred in the control. */
-button > .ico:only-child { display: block; margin: 0 auto; }
+/* A lone icon in a textless control centres through the UA default
+   text-align: center — keep it inline. Never display: block here:
+   :only-child counts elements, not text nodes, so the rule used to
+   misfire on icon + raw-text buttons ("New Chat") and wrap the icon
+   onto its own line above the label. */
 
 /* ---------------- Top toolbar (full width, never crowds) ---------------- */
 
