@@ -3,6 +3,7 @@ import { cancelPersist, explainSnapshot, persistNow, renderMessages } from './ch
 import { clearExplainWindows, restoreExplainWindows } from './explain-lifecycle.js';
 import { evictFileText, prefetchFileText, renderChips } from './files.js';
 import { polishNote } from './selection.js';
+import { confirmPop } from './dialog.js';
 import { $, convList, currentTitle, input, state } from './state.js';
 import { Fragment, html, render } from './views.js';
 import {
@@ -120,9 +121,16 @@ export async function selectConversation(id) {
   input.focus();
 }
 
-export async function deleteConversation(id, e) {
+export async function deleteConversation(id, e, anchor) {
   e.stopPropagation();
-  if (!confirm('Delete this conversation?')) return;
+  /* Anchor beside the initiator: the list hands over the delete button (its
+   * box climbs to the row), the graph menu hands over the item's rect. */
+  const sure = await confirmPop(anchor || (e && e.currentTarget) || null, {
+    title: 'Delete conversation?',
+    message: 'Its messages and explanations go with it.',
+    confirmLabel: 'Delete',
+  });
+  if (!sure) return;
   cancelPersist(id); // a queued save would resurrect it on disk
   abortBackgroundJobs(id); // and a queued job would write it back
   await fetch(`/api/conversations/${id}`, { method: 'DELETE' }).catch(() => {});

@@ -79,7 +79,7 @@ newChatBtn.addEventListener('click', async () => {
 
 convList.addEventListener('click', (e) => {
   const del = e.target.closest('.conv-delete');
-  if (del) { deleteConversation(del.dataset.id, e); return; }
+  if (del) { deleteConversation(del.dataset.id, e, del); return; }
   const item = e.target.closest('.conv-item');
   if (item) selectConversation(item.dataset.id);
 });

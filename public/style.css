@@ -2356,3 +2356,77 @@ body.ws-page-mode #main-row { display: none; }
   .ws-page-head h1 { font-size: 27px; }
   #ws-page-body[data-view='list'] .ws-card-meta { display: none; }
 }
+
+/* ============================================================
+   DIALOG LAYER + UNIFIED MOTION (Phase F entry — docs/DESIGN.md)
+   Small anchored dialogs replace the browser's alert/confirm.
+   Every surface that can move shares the same three curves:
+   --t-fast hover · --t-med popups · --t-slow views.
+   ============================================================ */
+
+#dialog-root { position: fixed; inset: 0; z-index: 900; pointer-events: none; }
+
+.dlg {
+  position: absolute;
+  min-width: 272px;
+  max-width: 384px;
+  background: var(--bg-panel);
+  border: 1px solid var(--edge-card);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  padding: var(--s4);
+  pointer-events: auto;
+}
+.dlg-title { font-size: var(--fs-body); font-weight: 500; color: var(--text); letter-spacing: -0.01em; }
+.dlg-msg {
+  font-size: var(--fs-ui);
+  line-height: 1.55;
+  color: var(--text-dim);
+  margin-top: var(--s2);
+  white-space: pre-line;   /* the workspace message sets two lines apart */
+}
+.dlg-input {
+  font: 400 var(--fs-ui)/1.45 var(--font-ui);
+  color: var(--text);
+  background: var(--bg-sunken);
+  border: 1px solid var(--edge-card);
+  border-radius: var(--r-md);
+  height: 36px;
+  width: 100%;
+  padding: 0 var(--s3);
+  margin-top: var(--s3);
+  transition: border-color var(--t-fast), background-color var(--t-fast);
+}
+.dlg-input::placeholder { color: var(--faint); }
+.dlg-input:focus { border-color: var(--intent); outline: none; background: var(--bg-panel); }
+.dlg-row { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s4); }
+
+.dlg-act {
+  font: 500 var(--fs-ui)/1 var(--font-ui);
+  height: 32px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color var(--t-fast), opacity var(--t-fast), border-color var(--t-fast);
+}
+.dlg-act.dlg-ink    { background: var(--bg-panel); color: var(--text); border-color: var(--edge-strong); }
+.dlg-act.dlg-ink:hover    { background: var(--bg-sunken); }
+.dlg-act.dlg-ghost  { background: transparent; color: var(--text-dim); border-color: var(--edge-card); }
+.dlg-act.dlg-ghost:hover  { color: var(--text); background: var(--bg-sunken); }
+.dlg-act.dlg-danger { background: transparent; color: var(--danger); border-color: var(--danger-tint); }
+.dlg-act.dlg-danger:hover { background: var(--danger-tint); }
+.dlg-act:focus-visible { outline: 2px solid var(--intent); outline-offset: 2px; }
+
+.dlg-scrim {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.24);
+  animation: dlg-scrim-in var(--t-med) both;
+}
+[data-theme='dark'] .dlg-scrim { background: rgba(0, 0, 0, 0.45); }
+@keyframes dlg-scrim-in { from { opacity: 0; } }
+
+.dlg.dlg-in  { animation: dlg-in var(--t-med) both; }
+.dlg.dlg-out { animation: dlg-out var(--t-fast) both; pointer-events: none; }
+@keyframes dlg-in  { from { opacity: 0; transform: translateY(6px) scale(0.97); } }
+@keyframes dlg-out { to   { opacity: 0; transform: translateY(3px); } }

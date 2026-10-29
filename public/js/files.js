@@ -79,15 +79,21 @@ export async function uploadFiles(fileList) {
       state.files.push(out.file);
       renderChips();
       if (!out.file.link) prefetchFileText(state.currentId, out.file.id);
-      showToast(`📎 Attached ${escapeHtml(out.file.name)}`);
+      showToast(`Attached ${escapeHtml(out.file.name)}`);
     } catch (e) {
-      showToast(`⚠️ ${escapeHtml(e.message || 'Upload failed')}`);
+      showToast(escapeHtml(e.message || 'Upload failed'));
     }
   }
 }
 
 export async function attachLink() {
-  const url = (prompt('Link to attach with this conversation:') || '').trim();
+  const { promptPop } = await import('./dialog.js'); // lazy — this path is rare
+  const url = ((await promptPop(null, {
+    title: 'Attach a link',
+    message: 'It joins this conversation as a source.',
+    placeholder: 'https://…',
+    okLabel: 'Add',
+  })) || '').trim();
   if (!url) return;
   if (!state.currentId) await createConversation();
   try {

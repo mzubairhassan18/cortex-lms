@@ -81,8 +81,11 @@ export function showMenu(x, y, items) {
       row.disabled = true;
     } else {
       row.addEventListener('click', () => {
+        /* The item's rect is captured BEFORE close() detaches it — actions
+         * that open their own small dialog anchor beside the menu entry. */
+        const at = row.getBoundingClientRect();
         close();
-        if (typeof it.onSelect === 'function') it.onSelect();
+        if (typeof it.onSelect === 'function') it.onSelect(at);
       });
     }
     box.appendChild(row);

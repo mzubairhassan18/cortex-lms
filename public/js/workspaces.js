@@ -9,6 +9,7 @@
  * so the arrow points the other way. Same rule as state.onGraphChange.
  */
 import { at } from './base.js';
+import { alertPop, confirmPop } from './dialog.js';
 import { explainSnapshot, persistNow } from './chat.js';
 import {
   loadConversations,
@@ -87,7 +88,7 @@ export async function switchWorkspace(id) {
   renderSwitcher();
 }
 
-export async function createWorkspace(name) {
+export async function createWorkspace(name, anchor) {
   const r = await fetch('/api/workspaces', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -95,7 +96,7 @@ export async function createWorkspace(name) {
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
-    alert(data.error || 'Could not create the workspace.');
+    await alertPop(anchor, { title: 'Could not create the workspace', message: data.error || 'Try a shorter or different name.' });
     return null;
   }
   await loadWorkspaces();
@@ -103,7 +104,7 @@ export async function createWorkspace(name) {
   return data;
 }
 
-export async function renameWorkspace(id, name) {
+export async function renameWorkspace(id, name, anchor) {
   const r = await fetch(`/api/workspaces/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -111,12 +112,12 @@ export async function renameWorkspace(id, name) {
   });
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));
-    alert(d.error || 'Could not rename the workspace.');
+    await alertPop(anchor, { title: 'Could not rename the workspace', message: d.error || 'The name may already exist.' });
   }
   await loadWorkspaces();
 }
 
-export async function deleteWorkspace(id) {
+export async function deleteWorkspace(id, anchor) {
   const w = state.workspaces.find((x) => x.id === id);
   if (!w) return;
   const n = w.conversationCount || 0;
@@ -124,14 +125,19 @@ export async function deleteWorkspace(id) {
     ? `Delete "${w.name}" and its ${n} conversation${n === 1 ? '' : 's'}?\n\n` +
       'They are archived, not destroyed.'
     : `Delete workspace "${w.name}"?`;
-  if (!confirm(msg)) return;
+  const sure = await confirmPop(anchor, {
+    title: 'Delete workspace?',
+    message: msg,
+    confirmLabel: 'Delete',
+  });
+  if (!sure) return;
 
   // Deleting a workspace that holds conversations has to be explicit.
   const url = `/api/workspaces/${id}${n ? '?force=1' : ''}`;
   const r = await fetch(url, { method: 'DELETE' });
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));
-    alert(d.error || 'Could not delete the workspace.');
+    await alertPop(anchor, { title: 'Could not delete the workspace', message: d.error || 'It may still be in use — try again.' });
     return;
   }
   const wasOpen = state.workspaceId === id;
@@ -322,8 +328,8 @@ async function commitName(key, value) {
     renderSwitcher();
     return;
   }
-  if (key === 'new') await createWorkspace(name);
-  else await renameWorkspace(key, name);
+  if (key === 'new') await createWorkspace(name, layer && layer.querySelector('[data-ws-input]'));
+  else await renameWorkspace(key, name, layer && layer.querySelector('[data-ws-input]'));
   renderLayer();
   renderSwitcher();
 }
@@ -350,7 +356,7 @@ function onClick(e) {
   }
   const del = e.target.closest('[data-del]');
   if (del) {
-    deleteWorkspace(del.dataset.del);
+    deleteWorkspace(del.dataset.del, del);
     return;
   }
   if (e.target.closest('[data-new]')) {

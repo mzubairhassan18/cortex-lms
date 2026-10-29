@@ -8,6 +8,7 @@
  */
 
 import { at } from './base.js';
+import { alertPop, confirmPop } from './dialog.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -55,30 +56,38 @@ async function load() {
   render();
 }
 
-async function create(name) {
+async function create(name, anchor) {
   const r = await fetch('/api/workspaces', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) { alert(d.error || 'Could not create the workspace.'); return false; }
+  if (!r.ok) {
+    await alertPop(anchor, { title: 'Could not create the workspace', message: d.error || 'Try a shorter or different name.' });
+    return false;
+  }
   await load();
   return true;
 }
 
 /* A workspace holding conversations must be deleted explicitly — same promise
  * the sidebar makes, so this screen never silently takes work with it. */
-async function remove(w) {
+async function remove(w, anchor) {
   const n = w.conversationCount || 0;
   const msg = n
     ? `Delete "${w.name}" and its ${countText(n)}?\n\nThey are archived, not destroyed.`
     : `Delete workspace "${w.name}"?`;
-  if (!confirm(msg)) return;
+  const sure = await confirmPop(anchor, {
+    title: 'Delete workspace?',
+    message: msg,
+    confirmLabel: 'Delete',
+  });
+  if (!sure) return;
   const r = await fetch(`/api/workspaces/${w.id}${n ? '?force=1' : ''}`, { method: 'DELETE' });
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));
-    alert(d.error || 'Could not delete the workspace.');
+    await alertPop(anchor, { title: 'Could not delete the workspace', message: d.error || 'It may still be in use — try again.' });
     return;
   }
   await load();
@@ -146,7 +155,7 @@ function startCreate(card) {
     const name = input.value.trim();
     if (commit && name) {
       done = true;
-      const ok = await create(name);
+      const ok = await create(name, input);
       if (!ok) { done = false; render(); } // keep the page usable after a rejected name
       return;
     }
@@ -194,7 +203,7 @@ export function initWorkspacePage() {
     if (del) {
       e.stopPropagation();
       const w = items.find((x) => x.id === del.closest('.ws-card').dataset.id);
-      if (w) remove(w);
+      if (w) remove(w, del);
       return;
     }
     const card = e.target.closest('.ws-card');

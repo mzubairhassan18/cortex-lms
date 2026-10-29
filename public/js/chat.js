@@ -1,5 +1,6 @@
 /* chat.js — split from public/app.js (app.js line 473-589). */
 import { renderConversationList, updateTitle } from './conversations.js';
+import { alertPop } from './dialog.js';
 import { clearExplainWindows } from './explain-lifecycle.js';
 import { filesContext, renderChips } from './files.js';
 import { highlightSources } from './highlight.js';
@@ -110,7 +111,7 @@ export async function sendMessage() {
          a silent return here looks like the send button simply does nothing. */
       input.value = text;
       autoResize(input);
-      alert(e.message || 'Could not start a conversation.');
+      await alertPop(input, { title: 'Could not start a conversation', message: e.message || 'Check your connection and try again.' });
       return;
     }
   }

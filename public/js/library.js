@@ -1,5 +1,6 @@
 /* library.js — split from public/app.js (app.js line 1762-1853). */
 import { selectConversation } from './conversations.js';
+import { alertPop } from './dialog.js';
 import { hideExplainPanel, showSidebar } from './explain-ui.js';
 import { fileTextCache, fmtSize, renderChips } from './files.js';
 import { setSummaryOverlay } from './overlays.js';
@@ -98,7 +99,12 @@ libraryBody.addEventListener('click', async (e) => {
   const del = e.target.closest('.lib-del');
   if (del) {
     const { conv, fid } = del.dataset;
-    if (!confirm('Delete this file from the library?')) return;
+    const sure = await confirmPop(del, {
+      title: 'Delete this file?',
+      message: 'It is removed from this conversation’s library.',
+      confirmLabel: 'Delete',
+    });
+    if (!sure) return;
     await fetch(`/api/conversations/${conv}/files/${fid}`, { method: 'DELETE' }).catch(() => {});
     if (conv === state.currentId) {
       state.files = (state.files || []).filter((f) => f.id !== fid);
