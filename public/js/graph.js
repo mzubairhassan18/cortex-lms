@@ -38,6 +38,16 @@ import { PinchGesture, WheelGesture } from '@use-gesture/vanilla';
 /* ---------------- refs ---------------- */
 
 const graphView = $('graph-view');
+let graphOutTimer = null;   // pending exit-fade teardown (see exitGraph)
+
+/* One entrance/exit language (style.css view-in/out): the class lives on the
+ * element itself, so ONLY its own animationend may clear it — child
+ * animations bubbling up must not cancel the entrance. */
+graphView.addEventListener('animationend', (e) => {
+  if (e.target !== graphView) return;
+  if (e.animationName === 'view-in') graphView.classList.remove('view-in');
+  else if (e.animationName === 'view-out') graphView.classList.remove('view-out');
+});
 const graphScroll = $('graph-scroll');
 const graphCanvas = $('graph-canvas');
 const graphPaths = $('graph-paths');
@@ -1546,8 +1556,9 @@ function convMenu(e, gnode) {
   items.push({
     label: 'Delete',
     danger: true,
-    onSelect: () => {
-      deleteConversation(id, e);
+    /* the menu hands us the item's rect (it is detached by the time we run) */
+    onSelect: (menuRect) => {
+      deleteConversation(id, e, menuRect);
       delete layoutPositions['c:' + id];
       saveLayout();
     },
@@ -1679,11 +1690,22 @@ function applyLabel() {
 }
 
 function enterGraph() {
+  /* Re-entering while the exit fade is still running cancels that teardown —
+   * otherwise the pending timer would demolish the board we just rebuilt. */
+  if (graphOutTimer) {
+    clearTimeout(graphOutTimer);
+    graphOutTimer = null;
+    graphView.classList.remove('view-out');
+  }
   state.view = 'graph';
   state.onGraphChange = schedule;
   try { localStorage.setItem('lb.view', 'graph'); } catch { /* private mode */ }
   document.body.classList.add('graph-mode');
   graphView.classList.remove('hidden');
+  /* The one entrance language: the board rises 6px and fades in over the
+   * page curve (style.css view-in). The module-level animationend handler
+   * clears the class when the entrance is done. */
+  graphView.classList.add('view-in');
   sidebarWasOpen = state.sidebar.open;
   closeSidebarQuietly();      // explanations are nodes here, not a panel
   for (const el of [summaryOverlay, settingsOverlay, libraryOverlay]) {
@@ -1693,9 +1715,7 @@ function enterGraph() {
   render();
 }
 
-function exitGraph() {
-  state.view = 'list';
-  state.onGraphChange = null;
+function teardownGraph() {
   hideMenu();
   if (drag) endNodeDrag();   // drop the window listeners with us
   try { localStorage.setItem('lb.view', 'list'); } catch { /* private mode */ }
@@ -1729,6 +1749,32 @@ function exitGraph() {
   sidebarWasOpen = false;
   updateCollapsed();
   applyLabel();
+  /* Returning to the list gets the same entrance as the board did — the desk
+   * (sidebar + chat) rises in; the toolbar above it stays put. Its animation
+   * end is also handled by the guarded module-level handler. */
+  const desk = document.getElementById('main-row');
+  if (desk) {
+    desk.classList.remove('view-in');
+    void desk.offsetWidth;    // restart the animation if we just came back
+    desk.classList.add('view-in');
+  }
+}
+
+/* The desk (sidebar + chat area) animates on return to the list; only its own
+ * animationend clears the class. */
+const deskEl = document.getElementById('main-row');
+if (deskEl) {
+  deskEl.addEventListener('animationend', (e) => {
+    if (e.target === deskEl && e.animationName === 'view-in') deskEl.classList.remove('view-in');
+  });
+}
+
+function exitGraph() {
+  state.view = 'list';
+  state.onGraphChange = null;
+  graphView.classList.add('view-out');     // fade down over --t-med first
+  if (graphOutTimer) clearTimeout(graphOutTimer);
+  graphOutTimer = setTimeout(() => { graphOutTimer = null; teardownGraph(); }, 240);
 }
 
 export function setView(view) {

@@ -33,7 +33,12 @@ function stored() {
 }
 
 function paint(t) {
+  /* Colors morph instead of snapping: the fade class carries a shared
+   * 200ms color transition for the flip, then clears itself. */
   root.setAttribute('data-theme', t);
+  root.classList.add('theme-fade');
+  clearTimeout(paint.timer);
+  paint.timer = setTimeout(() => root.classList.remove('theme-fade'), 340);
   if (!btn) return;
   btn.innerHTML = t === 'dark' ? glyph('sun') : glyph('moon');
   btn.title = t === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme';

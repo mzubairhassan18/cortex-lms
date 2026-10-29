@@ -2430,3 +2430,21 @@ body.ws-page-mode #main-row { display: none; }
 .dlg.dlg-out { animation: dlg-out var(--t-fast) both; pointer-events: none; }
 @keyframes dlg-in  { from { opacity: 0; transform: translateY(6px) scale(0.97); } }
 @keyframes dlg-out { to   { opacity: 0; transform: translateY(3px); } }
+
+/* ---- view switching: one entrance language, everywhere ----
+   The entering view rises 6px and fades in over the page curve; the leaving
+   graph fades down. The desk gets the same entrance when the list returns. */
+#graph-view.view-in  { animation: view-in var(--t-slow) both; }
+#graph-view.view-out { animation: view-out var(--t-med) both; pointer-events: none; }
+#main-row.view-in { animation: view-in var(--t-slow) both; }
+@keyframes view-in  { from { opacity: 0; transform: translateY(6px); } }
+@keyframes view-out { to   { opacity: 0; transform: translateY(4px); } }
+
+/* ---- theme switch: colors morph instead of snapping (theme.js adds/removes
+   the class around the flip; tokens.css reduced-motion kills it on request) */
+html.theme-fade body,
+html.theme-fade body *:not(svg):not(path):not(.gpath) {
+  transition-duration: var(--t-med) !important;
+  transition-property: background-color, border-color, color, fill;
+  transition-timing-function: cubic-bezier(0.20, 0.60, 0.25, 1);
+}
