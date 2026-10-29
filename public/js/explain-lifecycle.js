@@ -2,7 +2,7 @@
 import { persist } from './chat.js';
 import { buildExplainSystem, childPane, clearPanelRegistry, panelEl, subtreeIds, truncateLabel, unregisterNode } from './explain-system.js';
 import { activateExplain, hideExplainPanel, mountNode, renderAllChildTabs, renderChildTabs, renderExplainTabs, renderPanelMessages, showSidebar, updateCollapsedSoon, updateExplainToggle, updateRootVisibility, updateRowState, updateRowStates } from './explain-ui.js';
-import { boxOf, highlightSources, refreshAllHighlights } from './highlight.js';
+import { boxOf, highlightSources, highlightNotes, refreshAllHighlights } from './highlight.js';
 import { autoResize } from './interactions.js';
 import { $, explainPanels, explainTabs, input, messagesEl, popup, state } from './state.js';
 import { cleanHistory, makeStreamer, scrollDown, streamChat } from './stream.js';
@@ -84,6 +84,7 @@ export function createExplainWindow(selection, parentId = null) {
   mountNode(node);
   // The new container's selection must light up where it was taken from.
   highlightSources(effectiveParent ? boxOf(effectiveParent) : messagesEl, effectiveParent);
+  highlightNotes(effectiveParent ? boxOf(effectiveParent) : messagesEl, effectiveParent);
   if (effectiveParent) {
     renderChildTabs(effectiveParent);
     updateRowState(state.explains.nodes[effectiveParent]);

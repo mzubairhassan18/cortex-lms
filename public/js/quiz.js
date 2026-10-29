@@ -1,6 +1,7 @@
 /* quiz.js — split from public/app.js (app.js line 3148-3658). */
 import { escapeHtml, renderInline } from './markdown.js';
 import { persistNotes } from './selection.js';
+import { refreshAllHighlights } from './highlight.js';
 import { $, state, summaryBody, testBadges, testSection } from './state.js';
 import {
   applyVerdicts,
@@ -646,6 +647,7 @@ summaryBody.addEventListener('click', (e) => {
     state.notes = (state.notes || []).filter((n) => n.id !== id);
     persistNotes();
     renderSummary(summaryCache[state.currentId] || null, state.lastSummaryStatus);
+    refreshAllHighlights();
     return;
   }
   // Collapsible header: show/hide the points (and the test button).

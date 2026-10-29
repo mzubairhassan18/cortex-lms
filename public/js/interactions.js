@@ -3,7 +3,9 @@ import { persist, sendMessage } from './chat.js';
 import { confirmCloseExplain, sendExplain } from './explain-lifecycle.js';
 import { activateExplain, hideExplainPanel, paneGrow, setPaneGrow, showSidebar, updateCollapsed, updateCollapsedSoon } from './explain-ui.js';
 import { focusExplainFromMark } from './highlight.js';
+import { escapeHtml } from './markdown.js';
 import { explainPanels, explainsToggle, input, inputForm, dragWith, messagesEl, state } from './state.js';
+import { showToast } from './selection.js';
 
 /* ================= Input helpers ================= */
 
@@ -154,6 +156,11 @@ attachExplainHandlers(explainPanels);
 messagesEl.addEventListener('click', (e) => {
   const mark = e.target.closest('mark.explain-src');
   if (mark && mark.dataset.id) focusExplainFromMark(mark.dataset.id);
+  const noteMark = e.target.closest('mark.note-hl');
+  if (noteMark) {
+    const note = (state.notes || []).find((n) => n.id === noteMark.dataset.id);
+    if (note) showToast(`Note: ${escapeHtml(note.text)}`);
+  }
 });
 
 /* Header button: show/hide the explain panel without touching the containers. */

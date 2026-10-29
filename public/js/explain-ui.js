@@ -11,7 +11,7 @@ import {
   rootAncestorOf,
   truncateLabel,
 } from './explain-system.js';
-import { highlightSources } from './highlight.js';
+import { highlightSources, highlightNotes } from './highlight.js';
 import { closeLibrary } from './library.js';
 import { decorateCopy, escapeHtml, messageVNode } from './markdown.js';
 import { setSummaryOverlay } from './overlays.js';
@@ -103,6 +103,7 @@ export function renderPanelMessages(node) {
   );
   decorateCopy(host);
   highlightSources(host, node.id); // nested selections made in this container
+  highlightNotes(host, node.id);
   scrollDown(box);
 }
 

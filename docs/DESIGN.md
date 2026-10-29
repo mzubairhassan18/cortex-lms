@@ -259,8 +259,8 @@ in the same commit whenever possible.
   `[data-foot]` slots, so no-JS still reads "Cortex". Per-page foot links stay per
   page (content, not chrome). Keep `MARK_SVG` in sync with the `#i-cortex` sprite
   symbol (`public/index.html`) and `public/icon.svg`.
-- Chat word lift lives in `public/js/word-hover.js` (caret hit-test + CSS Custom
-  Highlight API) + `::highlight(word-hover)` in `style.css`. Tokens `--ink-hover`
-  carry the per-theme shift. Graceful no-op where the API is unavailable.
+- Note highlights: `mark.note-hl` (soft yellow + pin icon, `#i-pin`) persists via
+  `state.notes` and mirrors the explain-src pattern (`highlightNotes`/`unwrapNoteMarks`
+  in `highlight.js`). No panel — just a durable mark on saved text.
 - Perf budget (premium feel = fast feel): landing LCP text + fonts < 90KB; no image
   > 220KB on landing (screenshots WebP ≤ 160KB); 0 blocking font CSS besides tokens.

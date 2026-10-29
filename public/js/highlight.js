@@ -9,6 +9,10 @@ import { messagesEl, state } from './state.js';
  * Text that has an explanation gets highlighted in its origin — the main
  * chat for root containers, the parent container for nested ones.
  * Clicking a highlight instantly focuses (and widens) that container.
+ *
+ * Notes reuse the same machinery: a note leaves a soft highlight (mark.note-hl)
+ * with a small pin icon, persisted via state.notes. No panel, no AI — just a
+ * durable mark on the text the user saved.
  */
 
 export function boxOf(id) {
@@ -36,6 +40,21 @@ export function highlightSources(box, originId, force) {
   for (const t of targets) wrapFirstOccurrence(box, t.selection.trim(), t.id);
 }
 
+/* Rebuild every note highlight for the notes whose origin is originId. */
+export function highlightNotes(box, originId) {
+  if (!box) return;
+  const targets = (state.notes || [])
+    .filter((n) => (n.origin || null) === (originId || null))
+    .filter((n) => (n.raw || n.text) && (n.raw || n.text).trim())
+    .sort((a, b) => (a.at || 0) - (b.at || 0));
+  if (!targets.length) {
+    if (box.querySelector('mark.note-hl')) unwrapNoteMarks(box);
+    return;
+  }
+  unwrapNoteMarks(box);
+  for (const t of targets) wrapFirstOccurrence(box, (t.raw || t.text).trim(), t.id, 'note');
+}
+
 /* Unwrap previous marks — rebuild from scratch (simple and safe). */
 function unwrapMarks(box) {
   box.querySelectorAll('mark.explain-src').forEach((m) => {
@@ -44,6 +63,25 @@ function unwrapMarks(box) {
     while (m.firstChild) parent.insertBefore(m.firstChild, m);
     parent.removeChild(m);
     parent.normalize(); // merge split text nodes back together
+  });
+}
+
+/* Unwrap note marks — rebuild from scratch (simple and safe). */
+export function unwrapNoteMarks(box) {
+  if (!box) return;
+  box.querySelectorAll('mark.note-hl').forEach((m) => {
+    const parent = m.parentNode;
+    if (!parent) return;
+    Array.from(m.childNodes).forEach((c) => {
+      const isPin =
+        c.nodeType === 1 &&
+        (c.classList?.contains('note-pin') ||
+          (c.getAttribute && (c.getAttribute('class') || '').includes('note-pin')));
+      if (isPin) return; // discard the pin with the mark
+      parent.insertBefore(c, m);
+    });
+    parent.removeChild(m);
+    parent.normalize();
   });
 }
 
@@ -60,7 +98,7 @@ function gatherText(box) {
   return { full, starts };
 }
 
-export function wrapFirstOccurrence(box, text, id) {
+export function wrapFirstOccurrence(box, text, id, kind = 'explain') {
   // Gather ONCE per call. wrapRange only mutates the DOM when it succeeds (and
   // then we return immediately), and the "already wrapped" branch never
   // mutates — so re-walking the whole box on every attempt was pure waste.
@@ -75,12 +113,13 @@ export function wrapFirstOccurrence(box, text, id) {
     if (
       loc &&
       loc.node.parentElement &&
-      loc.node.parentElement.closest('mark.explain-src')
+      (loc.node.parentElement.closest('mark.explain-src') ||
+        loc.node.parentElement.closest('mark.note-hl'))
     ) {
       from = idx + 1;
       continue;
     }
-    if (wrapRange(starts, idx, idx + text.length, id)) return;
+    if (wrapRange(starts, idx, idx + text.length, id, kind)) return;
     from = idx + 1; // odd layout — try the next occurrence
   }
 }
@@ -92,7 +131,7 @@ export function locateOffset(starts, pos) {
   return null;
 }
 
-export function wrapRange(starts, s, e, id) {
+export function wrapRange(starts, s, e, id, kind = 'explain') {
   let startNode = null;
   let startOff = 0;
   let endNode = null;
@@ -115,9 +154,21 @@ export function wrapRange(starts, s, e, id) {
     range.setStart(startNode, startOff);
     range.setEnd(endNode, endOff);
     const mark = document.createElement('mark');
-    mark.className = 'explain-src';
+    if (kind === 'note') {
+      mark.className = 'note-hl';
+      mark.title = 'Note';
+      const pin = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      pin.setAttribute('class', 'ico note-pin');
+      pin.setAttribute('aria-hidden', 'true');
+      const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+      use.setAttribute('href', '#i-pin');
+      pin.appendChild(use);
+      mark.appendChild(pin);
+    } else {
+      mark.className = 'explain-src';
+      mark.title = 'Explanation ready — click to open it';
+    }
     mark.dataset.id = id;
-    mark.title = 'Explanation ready — click to open it';
     mark.appendChild(range.extractContents());
     range.insertNode(mark);
     return true;
@@ -129,8 +180,10 @@ export function wrapRange(starts, s, e, id) {
 export function refreshAllHighlights() {
   // force: after a delete there are marks but no targets left to explain them.
   highlightSources(messagesEl, null, true);
+  highlightNotes(messagesEl, null);
   for (const id of Object.keys(state.explains.nodes)) {
     highlightSources(boxOf(id), id, true);
+    highlightNotes(boxOf(id), id);
   }
 }
 

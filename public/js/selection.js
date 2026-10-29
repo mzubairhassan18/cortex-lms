@@ -2,6 +2,7 @@
 import { createConversation } from './chat.js';
 import { createExplainWindow } from './explain-lifecycle.js';
 import { escapeHtml, renderInline } from './markdown.js';
+import { boxOf, highlightNotes } from './highlight.js';
 import { $, explainPanels, messagesEl, popup, state } from './state.js';
 import { bgRequest, enqueueBg, renderSummary, summaryCache } from './summary.js';
 import { html } from './views.js';
@@ -98,7 +99,7 @@ popup.addEventListener('click', (e) => {
   const src = popup.dataset.src || '';
   hidePopup();
   if (btn.dataset.act === 'note') {
-    saveNote(text, src);
+    saveNote(text, src, origin);
   } else if (text) {
     createExplainWindow(text, origin || null);
   }
@@ -154,13 +155,14 @@ export function sentenceAround(full, sel) {
   return out.length > 400 ? `${out.slice(0, 397)}…` : out;
 }
 
-export async function saveNote(text, src) {
+export async function saveNote(text, src, origin = '') {
   if (!text) return;
   if (!state.currentId) await createConversation();
   let srcObj = null;
   try {
     srcObj = src ? JSON.parse(src) : null;
   } catch { /* no context available */ }
+  const noteOrigin = origin ? origin : null;
   const note = {
     id: `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
     text,               // what is shown (verbatim until polished)
@@ -169,12 +171,16 @@ export async function saveNote(text, src) {
     role: (srcObj && srcObj.role) || 'assistant',
     polished: false,
     at: Date.now(),
+    origin: noteOrigin,
   };
   state.notes = state.notes || [];
   state.notes.push(note);
   persistNotes();
   renderSummary(summaryCache[state.currentId] || null, state.lastSummaryStatus || '');
   showToast('Saved to notes');
+  // Persist the highlight in the chat (and in the origin explain panel, if any).
+  const box = noteOrigin ? boxOf(noteOrigin) : messagesEl;
+  if (box) highlightNotes(box, noteOrigin);
   // Non-blocking polish: any model the Auto route picks; failure = verbatim.
   enqueueBg(() => polishNote(state.currentId, note.id));
 }

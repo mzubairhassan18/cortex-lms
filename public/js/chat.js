@@ -3,7 +3,7 @@ import { renderConversationList, updateTitle } from './conversations.js';
 import { alertPop } from './dialog.js';
 import { clearExplainWindows } from './explain-lifecycle.js';
 import { filesContext, renderChips } from './files.js';
-import { highlightSources } from './highlight.js';
+import { highlightSources, highlightNotes } from './highlight.js';
 import { autoResize } from './interactions.js';
 import { decorateCopy, messageVNode } from './markdown.js';
 import { $, input, messagesEl, sendBtn, state } from './state.js';
@@ -46,6 +46,7 @@ export function renderMessages() {
   );
   decorateCopy(host); // header strip + copy button on every code block
   highlightSources(host, null); // highlight text that has explanations
+  highlightNotes(host, null);   // highlight text saved as notes
   scrollDown(messagesEl);
 }
 

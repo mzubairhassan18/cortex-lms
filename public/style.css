@@ -1379,6 +1379,28 @@ mark.explain-src {
 }
 mark.explain-src:hover { background: var(--yellow-hover); }
 
+/* Note highlights — a soft persistent highlight + a small pin icon.
+   Simpler than explain-src: no panel, just a durable mark on saved text. */
+mark.note-hl {
+  background: var(--yellow-bg);
+  color: inherit;
+  border-bottom: 2px solid var(--yellow-line);
+  border-radius: 3px;
+  padding: 1px 2px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+mark.note-hl:hover { background: var(--yellow-hover); }
+mark.note-hl .note-pin {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 2px;
+  vertical-align: -1px;
+  opacity: 0.85;
+  color: var(--warn);
+}
+
 /* ---------------- Topics summary overlay ---------------- */
 
 #summary-overlay {
