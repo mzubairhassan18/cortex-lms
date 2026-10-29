@@ -13,7 +13,9 @@ quizzes, graph canvas), local-first + Cloudflare Worker deploy, frameworkless fr
 
 **Identity & tokens**
 1. `docs/DESIGN.md` is law. New UI uses only tokens from `public/tokens.css` — zero
-   literal colors, zero rogue px sizes/spacing/radii anywhere in CSS.
+   literal colors, zero rogue px sizes/spacing/radii anywhere in CSS. Icons ride the
+   fixed 3-step scale (`--ico-1` 14 / `--ico-2` 15 / `--ico-3` 18; `.ico` = `--ico-2`)
+   — never hardcoded icon sizes.
 2. Fonts: **Fraunces (display) + Geist (UI)**, self-hosted in `public/vendor/fonts/`.
    Never add a font CDN (app is local/offline-first). Never swap the two faces' jobs.
 3. Accent (`--accent`, ember) = **AI features + user intent (focus/active) only**.
@@ -43,6 +45,9 @@ quizzes, graph canvas), local-first + Cloudflare Worker deploy, frameworkless fr
 14. Data/regression guards: graph Aligned mode, explain tree recursion, quiz grounding
     audit, and the graph Free-mode layout (`/api/layout`) have history — check they still
     pass after touching `graph.js`, `explain-*.js`, `layout` code.
+15. Shared page chrome = `public/js/site.js` (`mountBrand`/`mountFoot`). Pages keep
+    text-only `[data-brand]` anchors + hidden `[data-foot]` slots; never copy brand/foot
+    markup into a page. Keep `MARK_SVG` in sync with the `#i-cortex` sprite + `icon.svg`.
 
 ## Definition of done for UI phases
 - Lighthouse/perf: landing no layout shift from fonts, images/weight within budget.

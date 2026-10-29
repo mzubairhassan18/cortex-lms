@@ -21,7 +21,8 @@ One sentence to test every design decision against:
 ### Non-negotiable principles (in priority order)
 1. **Clarity before decoration.** If an element has no function, it doesn't exist.
    No grain, no gradients, no glows, no hover travel, no confetti. Emoji never appear
-   in product UI or wordmarks.
+   in product UI or wordmarks. (One sanctioned exception: the chat cursor lamp — §2
+   `--lamp`, a functional pointer-following highlight on chat reply text, not chrome.)
 2. **Field before chrome.** Structure is visible without color: every interactive
    element has ≥1 non-color affordance (border, fill, icon, or position).
 3. **Calm surfaces.** Light theme is the *primary* identity (paper-desk); dark is a
@@ -53,6 +54,8 @@ One sentence to test every design decision against:
 | `--warn` | `#92400E` | (small text) | warnings |
 | `--edge` | `rgba(24,24,27,.08)` | decorative | dividers, decorative hairlines |
 | `--edge-strong` | `#87878F` | 3.41 canvas (1.4.11 ✓) | borders that CARRY meaning: selected card, control boundary, graph edges |
+| `--selection` | `#FACC15` at 35% | ink-on-wash ≈ 16.1 ✓ | text selection (marker-yellow highlighter) |
+| `--lamp` | `#FACC15` at 14% | wash under ink, contrast holds | cursor lamp over chat reply text (#chat-area only) |
 | `--shadow-pop` | `0 8px 24px rgba(24,24,27,.14)` | — | menus/popovers/dialogs ONLY |
 
 ### Dark (equivalent)
@@ -70,6 +73,8 @@ One sentence to test every design decision against:
 | `--warn` | `#FBBF24` | — | |
 | `--edge` | `rgba(228,228,231,.09)` | decorative | |
 | `--edge-strong` | `#9A9AA3` | 6.65 ✓ | meaningful boundaries |
+| `--selection` | `#FACC15` at 22% | text-on-wash ≈ 8.6 ✓ | lifts the yellow, keeps text legible |
+| `--lamp` | `#FACC15` at 9% | quieter pool for graphite | cursor lamp, #chat-area only |
 
 **Hard rules**
 - No literal color outside `tokens.css`. Off-token need = add token (both themes) first.
@@ -119,6 +124,12 @@ That's the list. Fraunces is identity, Geist is function; they never swap mid-pa
 - Depth language = fill change (`canvas→surface→well`) + `--edge` hairlines. 
 - **Touch targets** ≥ 32px desktop dense UI; 44px in auth/pricing/payment; 24px absolute
   floor (WCAG 2.5.8) with 8px center spacing.
+- **Icon scale** — fixed 3-step role ladder, never hardcoded and never rogue sizes:
+  `--ico-3` 18px → standalone icon buttons + circle marks + brand-mark instances;
+  `--ico-2` 15px → default (buttons, toolbar, inputs, menus);
+  `--ico-1` 14px → dense rows, chips, meta rows, message-copy actions.
+  `.ico` in `style.css` ships at `var(--ico-2)`; jump to 1 or 3 only for those roles.
+  The boot-mark keeps its one-off 44px hero size. Drawings live on the 24-grid, stroke 2.
 
 ---
 
@@ -131,8 +142,13 @@ That's the list. Fraunces is identity, Geist is function; they never swap mid-pa
 | `--t-slow` | 320ms same curve | view switch, overlay, page transition |
 
 - Enter = fade + 4px translate (max). Exit = fade only.
-- Only two "life" signals allowed: streaming caret (ember, 2px, pulsing) and skeletons
-  (opacity pulse on flat blocks). Nothing else loops.
+- Only three "life" signals loop: streaming caret (ember, 2px, pulsing), the chat
+  thinking node (`.bubble.thinking` — one breathing ember dot, `ember-breathe` 1.4s,
+  halo via `--intent-soft`, transform+opacity only), and skeletons (opacity pulse on
+  flat blocks). Nothing else loops.
+- The cursor lamp (`--lamp` + `js/lamp.js`) is a pointer-following wash on chat reply
+  bubbles (`#chat-area` only — explain panels reuse `.bubble` markup). rAF-throttled;
+  transition-only activation, so reduced-motion collapse kills it for free.
 - `@media (prefers-reduced-motion: reduce)` → `* { transition-duration: 0.01ms !important;
   animation-duration: 0.01ms !important }` — verify every phase ships this.
 
@@ -234,5 +250,12 @@ in the same commit whenever possible.
   `fraunces-var.woff2` + `@font-face` in tokens.css (`font-display: swap`).
 - No-flash theme script stays (inline, pre-paint, `lb.theme`), default = `system`.
 - Landing + auth + pricing use tokens; NO copy of app-only chrome onto marketing pages.
+- Shared page chrome lives in `public/js/site.js` (`MARK_SVG`, `mountBrand()`,
+  `mountFoot()`): pages keep bare text-only `[data-brand]` anchors and hidden
+  `[data-foot]` slots, so no-JS still reads "Cortex". Per-page foot links stay per
+  page (content, not chrome). Keep `MARK_SVG` in sync with the `#i-cortex` sprite
+  symbol (`public/index.html`) and `public/icon.svg`.
+- Cursor lamp module `public/js/lamp.js` writes `--mx/--my` on chat bubbles only
+  (delegated on `#chat-area`); CSS consumes them in `style.css`. No visuals in JS.
 - Perf budget (premium feel = fast feel): landing LCP text + fonts < 90KB; no image
   > 220KB on landing (screenshots WebP ≤ 160KB); 0 blocking font CSS besides tokens.
