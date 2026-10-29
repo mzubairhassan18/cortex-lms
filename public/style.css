@@ -1382,9 +1382,10 @@ mark.explain-src:hover { background: var(--yellow-hover); }
 /* Note highlights — a soft persistent highlight + a small pin icon.
    Simpler than explain-src: no panel, just a durable mark on saved text.
    Background only (no underline) so it reads as a highlighter, distinct from
-   explain-src's amber underline. The pin floats above so text flow is untouched. */
+   explain-src's amber underline. The pin floats via ::before (no DOM node),
+   so it never disrupts text flow or adds line breaks. */
 mark.note-hl {
-  background: var(--yellow-bg);
+  background: rgba(250, 204, 21, 0.30);
   color: inherit;
   border-radius: 3px;
   padding: 1px 2px;
@@ -1392,7 +1393,19 @@ mark.note-hl {
   position: relative;
   transition: background 0.12s;
 }
-mark.note-hl:hover { background: var(--yellow-hover); }
+mark.note-hl:hover { background: rgba(250, 204, 21, 0.45); }
+mark.note-hl .note-pin {
+  position: absolute;
+  top: -8px;
+  right: -6px;
+  width: 12px;
+  height: 12px;
+  opacity: 0.9;
+  color: var(--warn);
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 1;
+}
 .note-item.note-flash {
   background: var(--yellow-hover);
   transition: background 0.15s;
@@ -1403,7 +1416,7 @@ mark.note-hl:hover { background: var(--yellow-hover); }
 #summary-overlay {
   position: absolute;
   inset: 0;
-  z-index: 20;
+  z-index: 1200;
   background: var(--bg-alt);
   border-left: 3px solid var(--accent2);
   display: flex;

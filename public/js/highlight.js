@@ -160,6 +160,7 @@ export function wrapRange(starts, s, e, id, kind = 'explain') {
       const pin = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       pin.setAttribute('class', 'ico note-pin');
       pin.setAttribute('aria-hidden', 'true');
+      pin.setAttribute('style', 'position:absolute;top:-8px;right:-6px;width:12px;height:12px;');
       const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
       use.setAttribute('href', '#i-pin');
       pin.appendChild(use);
