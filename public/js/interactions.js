@@ -154,45 +154,13 @@ export function attachExplainHandlers(host) {
 
 attachExplainHandlers(explainPanels);
 
-/* Clicking a note's pin inside an explain panel opens the summary. */
-explainPanels.addEventListener('click', (e) => {
-  const pin = e.target.closest('.note-pin');
-  if (!pin) return;
-  const noteMark = pin.closest('mark.note-hl');
-  if (!noteMark || !noteMark.dataset.id) return;
-  const noteId = noteMark.dataset.id;
-  const note = (state.notes || []).find((n) => n.id === noteId);
-  if (!note) return;
-  if (summaryOverlay.classList.contains('hidden')) {
-    setSummaryOverlay(true);
-    showCachedSummary();
-  }
-  window.setTimeout(() => {
-    const item = document.querySelector(`.note-item[data-note="${noteId}"]`);
-    if (item) {
-      item.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      item.classList.add('note-flash');
-      window.setTimeout(() => item.classList.remove('note-flash'), 1600);
-    }
-  }, 250);
-});
-
-/* Clicking highlighted source text focuses its explainer container.
-   Clicking a note's pin opens the notes card in the summary overlay and
-   flashes that note; double-clicking the pin removes the note. */
-messagesEl.addEventListener('click', (e) => {
-  const explainMark = e.target.closest('mark.explain-src');
-  if (explainMark && explainMark.dataset.id) focusExplainFromMark(explainMark.dataset.id);
-
-  const noteMark = e.target.closest('mark.note-hl');
-  if (!noteMark) return;
-  const noteId = noteMark.dataset.id;
-  const note = (state.notes || []).find((n) => n.id === noteId);
-  if (!note) return;
-
-  const pin = e.target.closest('.note-pin');
-  if (pin) {
-    // Open the summary overlay (where notes live) and flash the note.
+/* Clicking a note mark opens the summary and flashes that note;
+   double-clicking removes the note. Works in both main chat and explain panels. */
+let noteClickTimer = null;
+function openNoteInSummary(noteId) {
+  if (noteClickTimer) clearTimeout(noteClickTimer);
+  noteClickTimer = window.setTimeout(() => {
+    noteClickTimer = null;
     if (summaryOverlay.classList.contains('hidden')) {
       setSummaryOverlay(true);
       showCachedSummary();
@@ -205,33 +173,50 @@ messagesEl.addEventListener('click', (e) => {
         window.setTimeout(() => item.classList.remove('note-flash'), 1600);
       }
     }, 250);
-    return;
-  }
-  // Plain click on the highlight text: show the note.
-  showToast(`Note: ${escapeHtml(note.text)}`);
-});
+  }, 260);
+}
 
-/* Double-clicking a note's pin removes it from notes. */
-messagesEl.addEventListener('dblclick', (e) => {
-  const pin = e.target.closest('.note-pin');
-  if (!pin) return;
-  const noteMark = pin.closest('mark.note-hl');
-  if (!noteMark || !noteMark.dataset.id) return;
-  const id = noteMark.dataset.id;
+function deleteNoteById(id) {
+  if (noteClickTimer) { clearTimeout(noteClickTimer); noteClickTimer = null; }
   const delBtn = document.querySelector(`.note-del[data-note="${id}"]`);
   if (delBtn) {
     delBtn.click();
   } else {
     state.notes = (state.notes || []).filter((n) => n.id !== id);
     persistNotes();
-    // best-effort refresh
     try { refreshAllHighlights(); } catch (err) { /* ignore */ }
   }
+}
+
+messagesEl.addEventListener('click', (e) => {
+  const explainMark = e.target.closest('mark.explain-src');
+  if (explainMark && explainMark.dataset.id) focusExplainFromMark(explainMark.dataset.id);
+
+  const noteMark = e.target.closest('mark.note-hl');
+  if (!noteMark || !noteMark.dataset.id) return;
+  const note = (state.notes || []).find((n) => n.id === noteMark.dataset.id);
+  if (!note) return;
+  openNoteInSummary(noteMark.dataset.id);
+});
+
+messagesEl.addEventListener('dblclick', (e) => {
+  const noteMark = e.target.closest('mark.note-hl');
+  if (!noteMark || !noteMark.dataset.id) return;
+  deleteNoteById(noteMark.dataset.id);
   e.preventDefault();
 });
 
-/* Header button: show/hide the explain panel without touching the containers. */
-explainsToggle.addEventListener('click', () => {
-  if (state.sidebar.open) hideExplainPanel();
-  else showSidebar();
+explainPanels.addEventListener('click', (e) => {
+  const noteMark = e.target.closest('mark.note-hl');
+  if (!noteMark || !noteMark.dataset.id) return;
+  const note = (state.notes || []).find((n) => n.id === noteMark.dataset.id);
+  if (!note) return;
+  openNoteInSummary(noteMark.dataset.id);
+});
+
+explainPanels.addEventListener('dblclick', (e) => {
+  const noteMark = e.target.closest('mark.note-hl');
+  if (!noteMark || !noteMark.dataset.id) return;
+  deleteNoteById(noteMark.dataset.id);
+  e.preventDefault();
 });
