@@ -205,8 +205,8 @@ html[data-boot='out'] #boot { opacity: 0; pointer-events: none; }
  * theme and with hover states. */
 
 .ico {
-  width: 1em;
-  height: 1em;
+  width: var(--ico-2);
+  height: var(--ico-2);
   display: inline-block;
   vertical-align: -0.14em;
   fill: none;
@@ -257,6 +257,7 @@ html[data-boot='out'] #boot { opacity: 0; pointer-events: none; }
 }
 
 .logo { font-weight: 700; font-size: 16px; }
+.logo .ico { width: var(--ico-3); height: var(--ico-3); }  /* brand mark: 18, matches landing */
 
 /* ------------------------- workspace switcher -------------------------
    The list-view route into workspaces: in graph view you zoom out to 40%
@@ -288,7 +289,7 @@ html[data-boot='out'] #boot { opacity: 0; pointer-events: none; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-#ws-switch .ico { flex: none; font-size: 14px; color: var(--text-dim); }
+#ws-switch .ico { flex: none; width: var(--ico-1); height: var(--ico-1); color: var(--text-dim); }
 
 #ws-menu {
   position: absolute;
@@ -348,7 +349,7 @@ html[data-boot='out'] #boot { opacity: 0; pointer-events: none; }
   text-decoration: none;
   color: var(--text-dim);
 }
-.ws-menu-item.all .ico { flex: none; font-size: 14px; }
+.ws-menu-item.all .ico { flex: none; width: var(--ico-1); height: var(--ico-1); }
 .ws-menu-item.all:hover { color: var(--accent); }
 .ws-menu-input {
   width: 100%;
@@ -447,11 +448,11 @@ html[data-boot='out'] #boot { opacity: 0; pointer-events: none; }
   color: var(--text-dim);
   cursor: pointer;
   opacity: 0;
-  font-size: 13px;
   padding: 2px 6px;
   border-radius: 4px;
   transition: opacity 0.12s;
 }
+.conv-delete .ico { width: var(--ico-1); height: var(--ico-1); }
 .conv-item:hover .conv-delete { opacity: 1; }
 .conv-delete:hover { color: var(--danger); }
 
@@ -471,7 +472,6 @@ html[data-boot='out'] #boot { opacity: 0; pointer-events: none; }
   background: none;
   border: none;
   color: var(--text);
-  font-size: 18px;
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 6px;
@@ -493,7 +493,7 @@ html[data-boot='out'] #boot { opacity: 0; pointer-events: none; }
   align-items: center;
   flex-shrink: 0;
 }
-#model-icon { display: none; font-size: 16px; }
+#model-icon { display: none; }
 
 #model-select {
   background: var(--bg-panel);
@@ -555,12 +555,12 @@ body.compact-header #model-select {
   align-self: flex-start; /* keep it in place in the column layout */
   width: 26px;
   height: 26px;
-  font-size: 19px; /* same 🎓 as the header — no badge background */
   line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
+.msg-avatar .ico { width: var(--ico-3); height: var(--ico-3); }  /* brand mark instance */
 .msg-body { min-width: 0; }
 .msg-copy {
   background: none;
@@ -572,6 +572,7 @@ body.compact-header #model-select {
   margin-left: 4px;
   text-align: left;
 }
+.msg-copy .ico { width: var(--ico-1); height: var(--ico-1); }
 .msg-copy:hover { color: var(--accent); }
 .msg-copy.copied { color: var(--accent2); }
 
@@ -771,7 +772,7 @@ body.compact-header #model-select {
   border: 1px solid var(--border);
   color: var(--text-dim);
   border-radius: 12px;
-  font-size: 18px;
+  font-size: var(--ico-3);   /* icon-only controls: fixed step, not text size */
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
 }
@@ -980,7 +981,6 @@ body.library-open #explain-tabs { display: none; }
   border: none;
   color: var(--text-dim);
   cursor: pointer;
-  font-size: 15px;
   padding: 4px 8px;
   border-radius: 6px;
 }
@@ -1267,7 +1267,7 @@ body.library-open #explain-tabs { display: none; }
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--ico-3);   /* send glyph: standalone control step */
 }
 .ep-send:hover:not(:disabled) { opacity: 0.85; }
 .ep-send:disabled { opacity: 0.4; cursor: default; }
@@ -1406,7 +1406,6 @@ mark.explain-src:hover { background: var(--yellow-hover); }
   border: none;
   color: var(--text-dim);
   cursor: pointer;
-  font-size: 15px;
   padding: 4px 8px;
   border-radius: 6px;
 }
@@ -2083,7 +2082,7 @@ body.ws-page-mode #main-row { display: none; }
   color: var(--text-dim);
   text-decoration: none;
 }
-#ws-page-brand .ico { font-size: 17px; }
+#ws-page-brand .ico { width: var(--ico-3); height: var(--ico-3); }
 #ws-page-brand:hover { color: var(--accent); }
 
 .ws-page-inner { max-width: 1040px; margin: 0 auto; }
@@ -2125,7 +2124,7 @@ body.ws-page-mode #main-row { display: none; }
   color: var(--text-dim);
 }
 .ws-page-search:focus-within { border-color: var(--accent); color: var(--accent); }
-.ws-page-search .ico { font-size: 17px; flex: none; }
+.ws-page-search .ico { width: var(--ico-2); height: var(--ico-2); flex: none; }
 .ws-page-search input {
   flex: 1;
   min-width: 0;
