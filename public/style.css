@@ -1414,7 +1414,7 @@ mark.note-hl .note-pin {
 /* ---------------- Topics summary overlay ---------------- */
 
 #summary-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 1200;
   background: var(--bg-alt);
