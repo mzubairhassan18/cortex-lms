@@ -1393,15 +1393,9 @@ mark.note-hl {
   transition: background 0.12s;
 }
 mark.note-hl:hover { background: var(--yellow-hover); }
-mark.note-hl .note-pin {
-  position: absolute;
-  top: -7px;
-  right: -5px;
-  width: 11px;
-  height: 11px;
-  opacity: 0.9;
-  color: var(--warn);
-  pointer-events: none;
+.note-item.note-flash {
+  background: var(--yellow-hover);
+  transition: background 0.15s;
 }
 
 /* ---------------- Topics summary overlay ---------------- */

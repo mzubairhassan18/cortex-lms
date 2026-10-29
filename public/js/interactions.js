@@ -2,10 +2,12 @@
 import { persist, sendMessage } from './chat.js';
 import { confirmCloseExplain, sendExplain } from './explain-lifecycle.js';
 import { activateExplain, hideExplainPanel, paneGrow, setPaneGrow, showSidebar, updateCollapsed, updateCollapsedSoon } from './explain-ui.js';
-import { focusExplainFromMark } from './highlight.js';
+import { focusExplainFromMark, refreshAllHighlights } from './highlight.js';
 import { escapeHtml } from './markdown.js';
-import { explainPanels, explainsToggle, input, inputForm, dragWith, messagesEl, state } from './state.js';
-import { showToast } from './selection.js';
+import { setSummaryOverlay } from './overlays.js';
+import { explainPanels, explainsToggle, input, inputForm, dragWith, messagesEl, state, summaryBtn, summaryOverlay } from './state.js';
+import { showCachedSummary } from './summary.js';
+import { showToast, persistNotes } from './selection.js';
 
 /* ================= Input helpers ================= */
 
@@ -152,15 +154,57 @@ export function attachExplainHandlers(host) {
 
 attachExplainHandlers(explainPanels);
 
-/* Clicking highlighted source text focuses its explainer container. */
+/* Clicking highlighted source text focuses its explainer container.
+   Clicking a note's pin opens the notes card in the summary overlay and
+   flashes that note; double-clicking the pin removes the note. */
 messagesEl.addEventListener('click', (e) => {
-  const mark = e.target.closest('mark.explain-src');
-  if (mark && mark.dataset.id) focusExplainFromMark(mark.dataset.id);
+  const explainMark = e.target.closest('mark.explain-src');
+  if (explainMark && explainMark.dataset.id) focusExplainFromMark(explainMark.dataset.id);
+
   const noteMark = e.target.closest('mark.note-hl');
-  if (noteMark) {
-    const note = (state.notes || []).find((n) => n.id === noteMark.dataset.id);
-    if (note) showToast(`Note: ${escapeHtml(note.text)}`);
+  if (!noteMark) return;
+  const noteId = noteMark.dataset.id;
+  const note = (state.notes || []).find((n) => n.id === noteId);
+  if (!note) return;
+
+  const pin = e.target.closest('.note-pin');
+  if (pin) {
+    // Open the summary overlay (where notes live) and flash the note.
+    if (summaryOverlay.classList.contains('hidden')) {
+      setSummaryOverlay(true);
+      showCachedSummary();
+    }
+    window.setTimeout(() => {
+      const item = document.querySelector(`.note-item[data-note="${noteId}"]`);
+      if (item) {
+        item.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        item.classList.add('note-flash');
+        window.setTimeout(() => item.classList.remove('note-flash'), 1600);
+      }
+    }, 250);
+    return;
   }
+  // Plain click on the highlight text: show the note.
+  showToast(`Note: ${escapeHtml(note.text)}`);
+});
+
+/* Double-clicking a note's pin removes it from notes. */
+messagesEl.addEventListener('dblclick', (e) => {
+  const pin = e.target.closest('.note-pin');
+  if (!pin) return;
+  const noteMark = pin.closest('mark.note-hl');
+  if (!noteMark || !noteMark.dataset.id) return;
+  const id = noteMark.dataset.id;
+  const delBtn = document.querySelector(`.note-del[data-note="${id}"]`);
+  if (delBtn) {
+    delBtn.click();
+  } else {
+    state.notes = (state.notes || []).filter((n) => n.id !== id);
+    persistNotes();
+    // best-effort refresh
+    try { refreshAllHighlights(); } catch (err) { /* ignore */ }
+  }
+  e.preventDefault();
 });
 
 /* Header button: show/hide the explain panel without touching the containers. */

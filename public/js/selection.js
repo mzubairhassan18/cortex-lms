@@ -157,6 +157,8 @@ export function sentenceAround(full, sel) {
 
 export async function saveNote(text, src, origin = '') {
   if (!text) return;
+  text = String(text).trim();
+  if (!text) return;
   if (!state.currentId) await createConversation();
   let srcObj = null;
   try {
