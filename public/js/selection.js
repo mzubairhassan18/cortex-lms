@@ -174,7 +174,7 @@ export async function saveNote(text, src) {
   state.notes.push(note);
   persistNotes();
   renderSummary(summaryCache[state.currentId] || null, state.lastSummaryStatus || '');
-  showToast('📌 Saved to notes');
+  showToast('Saved to notes');
   // Non-blocking polish: any model the Auto route picks; failure = verbatim.
   enqueueBg(() => polishNote(state.currentId, note.id));
 }
@@ -249,7 +249,7 @@ export function notesSectionVNode() {
               __html:
                 renderInline(escapeHtml(String(n.text || ''))) +
                 (n.polished
-                  ? ' <span class="note-ai" title="AI-polished from your highlight">✨</span>'
+                  ? ' <span class="note-ai" title="AI-polished from your highlight"><svg class="ico" aria-hidden="true"><use href="#i-bulb"></use></svg></span>'
                   : ''),
             }}
           />

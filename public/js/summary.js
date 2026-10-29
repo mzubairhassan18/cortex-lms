@@ -418,20 +418,20 @@ export function renderSummary(entry, status) {
         </button>
         <div class="summary-details" hidden=${!state.summaryExpanded}>
           ${points.length
-            ? html`<div class="sum-group-label">🔎 Key findings</div>
+            ? html`<div class="sum-group-label">Key findings</div>
                 <ul class="summary-points">${points.map(
                   (p) =>
                     html`<li dangerouslySetInnerHTML=${{ __html: renderInline(escapeHtml(String(p))) }} />`
                 )}</ul>`
             : null}
           ${topics.length
-            ? html`<div class="sum-group-label">🏷️ Topics</div>
+            ? html`<div class="sum-group-label">Topics</div>
                 <div class="sum-topics">${topics.map(
                   (t) => html`<span class="topic-tag">${String(t)}</span>`
                 )}</div>`
             : null}
           ${questions.length
-            ? html`<div class="sum-group-label">❓ Questions you asked</div>
+            ? html`<div class="sum-group-label">Questions you asked</div>
                 <ul class="summary-questions">${questions.map(
                   (q) =>
                     html`<li dangerouslySetInnerHTML=${{ __html: renderInline(escapeHtml(String(q))) }} />`
@@ -471,7 +471,7 @@ export function renderTestSection() {
         } question${quiz.questions.length === 1 ? '' : 's'})</button
       >`
     : preparing
-      ? html`<span class="test-wait">⏳ Preparing your test…</span>`
+      ? html`<span class="test-wait">Preparing your test…</span>`
       : hasContent
         ? html`<span class="test-wait">No test yet — use the refresh button in the header to generate one.</span>`
         : html`<span class="test-wait">Chat or explain something to unlock a test.</span>`;

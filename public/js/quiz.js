@@ -577,12 +577,12 @@ export function renderResults() {
   renderTestBadges();
   const grade =
     r.percent >= 90
-      ? '🏆 Excellent!'
+      ? 'Excellent.'
       : r.percent >= 70
-        ? '👏 Good job!'
+        ? 'Good job.'
         : r.percent >= 50
-          ? '📘 Decent — review the points, then try again.'
-          : '🌱 Have another look at the summary, then try again.';
+          ? 'Decent — review the points, then try again.'
+          : 'Have another look at the summary, then try again.';
   render(
     html`<div class="results-card">
       <div class="results-score">

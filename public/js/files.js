@@ -25,7 +25,7 @@ export function renderChips() {
     .map(
       (f) => `
     <span class="chip ${f.link ? 'chip-link' : ''}" title="${escapeHtml(f.link || f.name)}">
-      <span class="chip-ico">${f.link ? '🔗' : '📎'}</span>
+      <span class="chip-ico"><svg class="ico" aria-hidden="true"><use href="${f.link ? '#i-link' : '#i-folder'}"></use></svg></span>
       <span class="chip-name">${escapeHtml(f.name)}</span>
       <span class="chip-meta">${f.link ? 'link' : fmtSize(f.size)}</span>
       <button type="button" class="chip-x" data-fid="${f.id}" title="Remove this attachment"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
@@ -61,7 +61,7 @@ export async function uploadFiles(fileList) {
       // Read once: the extractor and the base64 body want the same bytes, and
       // a multi-MB file is not worth reading from disk twice.
       const buf = await file.arrayBuffer();
-      showToast(`📎 Reading ${escapeHtml(file.name)}…`);
+      showToast(`Reading ${escapeHtml(file.name)}…`);
       const text = await extractFileText(buf, file.name);
       const res = await fetch(`/api/conversations/${state.currentId}/files`, {
         method: 'POST',
@@ -107,9 +107,9 @@ export async function attachLink() {
     state.files = state.files || [];
     state.files.push(out.file);
     renderChips();
-    showToast(`🔗 Attached ${escapeHtml(out.file.name)}`);
+    showToast(`Attached ${escapeHtml(out.file.name)}`);
   } catch (e) {
-    showToast(`⚠️ ${escapeHtml(e.message || 'Could not attach link')}`);
+    showToast(escapeHtml(e.message || 'Could not attach link'));
   }
 }
 
@@ -121,7 +121,7 @@ export async function removeFile(fid) {
   if (convId) {
     fetch(`/api/conversations/${convId}/files/${fid}`, { method: 'DELETE' }).catch(() => {});
   }
-  showToast('📎 Attachment removed');
+  showToast('Attachment removed');
 }
 
 export function prefetchFileText(convId, fid) {

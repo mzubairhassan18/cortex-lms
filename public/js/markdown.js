@@ -128,10 +128,11 @@ export function renderMarkdown(src) {
 }
 
 /* Cortex badge shown at the top-left edge of assistant responses. */
-/* The mark from the app header (the Cortex node-graph glyph) — shown above
- * each response as-is, no badge background. Same sprite as every control. */
+/* The brand mark (i-cortex — the same open-node-to-ember-answer glyph as the
+ * app header), shown above each response, no badge background. Same sprite as
+ * every control, so it shifts with the theme. */
 export const AVATAR_MARK =
-  '<svg class="ico avatar-ico" aria-hidden="true"><use href="#i-graph"></use></svg>';
+  '<svg class="ico avatar-ico" aria-hidden="true"><use href="#i-cortex"></use></svg>';
 
 /* Control icon helper: same sprite the rest of the UI draws from. */
 export const copyIco = (id) =>

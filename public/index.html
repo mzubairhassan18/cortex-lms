@@ -61,6 +61,15 @@
     <symbol id="i-message" viewBox="0 0 24 24"><path d="M20.5 11.5a7.5 7.5 0 0 1-7.5 7.5H7.8L3.5 21.5V11.5a7.5 7.5 0 0 1 7.5-7.5h2a7.5 7.5 0 0 1 7.5 7.5z"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8A1.5 1.5 0 0 1 20.5 10v8A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z"/></symbol>
     <symbol id="i-graph" viewBox="0 0 24 24"><circle cx="5.5" cy="7" r="2.4"/><circle cx="18.5" cy="6" r="2.4"/><circle cx="17" cy="18" r="2.4"/><path d="M7.8 7.2l8.4-1M7.2 8.9l8.3 7.5"/></symbol>
+    <!-- The Cortex brand mark, one glyph everywhere: an open question node joined
+         to the answer it got (ember). Same geometry as landing.html + icon.svg.
+         Canvas is chrome — currentColor; the ember node is --intent so it lifts
+         with the theme. (Presentation attributes can't read CSS vars — style.) -->
+    <symbol id="i-cortex" viewBox="0 0 64 64">
+      <path d="M24.5 39.5 39.5 24.5" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="21" cy="43" r="8.5" fill="none" stroke="currentColor" stroke-width="5"/>
+      <circle cx="44" cy="20" r="9.5" style="fill: var(--intent);"/>
+    </symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1M20.5 4v4.5H16"/></symbol>
     <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3.5 4v4.5H8"/></symbol>
     <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h13M13 7l5 5-5 5"/></symbol>
@@ -91,7 +100,7 @@
   -->
   <div id="boot">
     <div class="boot-in">
-      <svg class="ico boot-mark" aria-hidden="true"><use href="#i-graph"></use></svg>
+      <svg class="ico boot-mark" aria-hidden="true"><use href="#i-cortex"></use></svg>
       <span class="boot-name">Cortex</span>
       <span class="boot-bar" aria-hidden="true"><i></i></span>
       <span class="boot-hint">Loading your workspace…</span>
@@ -131,7 +140,7 @@
     <!-- Left sidebar: conversation history -->
     <aside id="left-sidebar">
       <div class="left-header">
-        <span class="logo"><svg class="ico" aria-hidden="true"><use href="#i-graph"></use></svg> Cortex</span>
+        <span class="logo"><svg class="ico" aria-hidden="true"><use href="#i-cortex"></use></svg> Cortex</span>
       </div>
       <!--
         Workspace switcher — the ONLY way to reach workspaces from list view.
@@ -355,7 +364,7 @@
   -->
   <div id="ws-page" hidden>
     <a id="ws-page-brand" href="./app" title="Back to Cortex">
-      <svg class="ico" aria-hidden="true"><use href="#i-graph"></use></svg> Cortex
+      <svg class="ico" aria-hidden="true"><use href="#i-cortex"></use></svg> Cortex
     </a>
 
     <div class="ws-page-inner">

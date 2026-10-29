@@ -60,7 +60,7 @@ export async function renderLibrary() {
       html`<div class="lib-list">
         ${files.map(
           (f) => html`<div class="lib-row">
-            <span class="lib-ico">${f.link ? '🔗' : '📎'}</span>
+            <span class="lib-ico"><svg class="ico" aria-hidden="true"><use href="${f.link ? '#i-link' : '#i-folder'}"></use></svg></span>
             <div class="lib-main">
               <div class="lib-name" title=${f.link || f.name}>${f.name}</div>
               <div class="lib-meta">

@@ -1639,7 +1639,7 @@ mark.explain-src:hover { background: var(--yellow-hover); }
   font-style: italic;
   line-height: 1.45;
 }
-.note-ai { font-style: normal; }
+.note-ai { font-style: normal; color: var(--intent); }   /* ember = the AI touched this */
 .note-del {
   position: absolute;
   top: 6px;
