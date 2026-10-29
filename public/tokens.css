@@ -105,7 +105,9 @@
   --shadow-pop: 0 8px 24px rgba(24, 24, 27, 0.14);  /* menus/dialogs/toasts ONLY */
 
   --selection: rgba(250, 204, 21, 0.35);   /* text selection — marker yellow */
-  --lamp: rgba(250, 204, 21, 0.14);        /* cursor lamp over chat text */
+
+  --ink-hover: #000000;                    /* chat hover: text lifts to max ink */
+  --text-glow: rgba(255, 255, 255, 0.5);   /* chat hover: whitish halo on glyphs */
 
   --dot-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='1.5' cy='1.5' r='1.2' fill='%2318181B' fill-opacity='0.05'/%3E%3C/svg%3E");
 }
@@ -135,7 +137,9 @@
   --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
 
   --selection: rgba(250, 204, 21, 0.22);   /* lifts the yellow, keeps text legible */
-  --lamp: rgba(250, 204, 21, 0.09);
+
+  --ink-hover: #FAFAFA;                    /* text visibly brightens in graphite */
+  --text-glow: rgba(255, 255, 255, 0.3);   /* quiet white halo for the night theme */
 
   --dot-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='1.5' cy='1.5' r='1.2' fill='%23E4E4E7' fill-opacity='0.06'/%3E%3C/svg%3E");
 }

@@ -630,22 +630,17 @@ body.compact-header #model-select {
   50%      { transform: scale(1); opacity: 1; box-shadow: 0 0 0 6px var(--intent-soft); }
 }
 
-/* cursor lamp over assistant reply text: a soft light pool follows the
-   pointer (--mx/--my set by js/lamp.js). It dies under reduced-motion
-   collapse (opacity lands on 0 base). Chat reading stream only — explain
-   panels reuse .bubble markup, so scope to #chat-area to keep them quiet. */
-#chat-area .msg.assistant .bubble { position: relative; }
-#chat-area .msg.assistant .bubble:not(.thinking)::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity var(--t-fast);
-  background: radial-gradient(120px 90px at var(--mx, 50%) var(--my, 50%), var(--lamp), transparent 68%);
+/* hover lift on assistant reply text: the GLYPHS brighten — a whitish halo
+   on the text itself, no colored pool, no cursor tracking. Deepens ink in the
+   light theme, lifts toward white in graphite. Neither wobbles under
+   reduced-motion collapse (plain property transitions to a static end state). */
+#chat-area .msg.assistant .bubble:not(.thinking) {
+  transition: color var(--t-fast), text-shadow var(--t-fast);
 }
-#chat-area .msg.assistant .bubble:hover::after { opacity: 1; }
+#chat-area .msg.assistant .bubble:not(.thinking):hover {
+  color: var(--ink-hover);
+  text-shadow: 0 0 6px var(--text-glow);
+}
 
 /* Markdown inside bubbles */
 .bubble pre {
