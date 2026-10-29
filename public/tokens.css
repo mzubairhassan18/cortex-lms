@@ -106,7 +106,7 @@
 
   --selection: rgba(250, 204, 21, 0.35);   /* text selection — marker yellow */
 
-  --ink-hover: color-mix(in srgb, var(--ink) 55%, #000000 45%);  /* word under pointer: ~45% darker (clearly visible, still small) */
+  --ink-hover: color-mix(in srgb, var(--ink) 90%, #000000 10%);  /* word under pointer: 10% darker (your spec) */
 
   --dot-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='1.5' cy='1.5' r='1.2' fill='%2318181B' fill-opacity='0.05'/%3E%3C/svg%3E");
 }
@@ -137,7 +137,7 @@
 
   --selection: rgba(250, 204, 21, 0.22);   /* lifts the yellow, keeps text legible */
 
-  --ink-hover: color-mix(in srgb, var(--ink) 65%, #FFFFFF 35%);  /* ~35% brighter, clearly visible */
+  --ink-hover: color-mix(in srgb, var(--ink) 90%, #FFFFFF 10%);  /* 10% brighter (your spec) */
 
   --dot-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='1.5' cy='1.5' r='1.2' fill='%23E4E4E7' fill-opacity='0.06'/%3E%3C/svg%3E");
 }

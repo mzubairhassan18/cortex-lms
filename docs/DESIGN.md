@@ -56,7 +56,7 @@ One sentence to test every design decision against:
 | `--edge` | `rgba(24,24,27,.08)` | decorative | dividers, decorative hairlines |
 | `--edge-strong` | `#87878F` | 3.41 canvas (1.4.11 ✓) | borders that CARRY meaning: selected card, control boundary, graph edges |
 | `--selection` | `#FACC15` at 35% | ink-on-wash ≈ 16.1 ✓ | text selection (marker-yellow highlighter) |
-| `--ink-hover` | `#18181B` 45% darker | ΔL* ≈ 4 (visible while reading) | word under the pointer in chat replies (CSS Highlight API) |
+| `--ink-hover` | `#18181B` 10% darker | your spec (ΔL* ≈ 1) | word under the pointer in chat replies (CSS Highlight API) |
 | `--shadow-pop` | `0 8px 24px rgba(24,24,27,.14)` | — | menus/popovers/dialogs ONLY |
 
 ### Dark (equivalent)
@@ -75,7 +75,7 @@ One sentence to test every design decision against:
 | `--edge` | `rgba(228,228,231,.09)` | decorative | |
 | `--edge-strong` | `#9A9AA3` | 6.65 ✓ | meaningful boundaries |
 | `--selection` | `#FACC15` at 22% | text-on-wash ≈ 8.6 ✓ | lifts the yellow, keeps text legible |
-| `--ink-hover` | `#E4E4E7` 35% lighter | ΔL* ≈ 4 | word under the pointer in graphite |
+| `--ink-hover` | `#E4E4E7` 10% lighter | your spec | word under the pointer in graphite |
 
 **Hard rules**
 - No literal color outside `tokens.css`. Off-token need = add token (both themes) first.
