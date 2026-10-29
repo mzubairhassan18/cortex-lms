@@ -21,8 +21,9 @@ One sentence to test every design decision against:
 ### Non-negotiable principles (in priority order)
 1. **Clarity before decoration.** If an element has no function, it doesn't exist.
    No grain, no gradients, no glows, no hover travel, no confetti. Emoji never appear
-   in product UI or wordmarks. (One sanctioned exception: the chat hover text lift — §2
-   `--text-glow`, a whitish halo on reply glyphs the user asked for, functional not chrome.)
+   in product UI or wordmarks. (One sanctioned exception: the chat word lift — §2
+   `--ink-hover`, a ~10% perceptual lightness shift on the glyph under the pointer,
+   functional not chrome.)
 2. **Field before chrome.** Structure is visible without color: every interactive
    element has ≥1 non-color affordance (border, fill, icon, or position).
 3. **Calm surfaces.** Light theme is the *primary* identity (paper-desk); dark is a
@@ -55,8 +56,7 @@ One sentence to test every design decision against:
 | `--edge` | `rgba(24,24,27,.08)` | decorative | dividers, decorative hairlines |
 | `--edge-strong` | `#87878F` | 3.41 canvas (1.4.11 ✓) | borders that CARRY meaning: selected card, control boundary, graph edges |
 | `--selection` | `#FACC15` at 35% | ink-on-wash ≈ 16.1 ✓ | text selection (marker-yellow highlighter) |
-| `--ink-hover` | `#000000` | 21.0 on canvas ✓ | chat hover: reply glyphs lift to max ink |
-| `--text-glow` | `#FFFFFF` at 50% | halo only (decorative) | chat hover: whitish halo on glyphs (text only, no pool) |
+| `--ink-hover` | `#18181B` 25% darker | ΔL* ≈ 3 (small, visible on motion) | word under the pointer in chat replies (CSS Highlight API) |
 | `--shadow-pop` | `0 8px 24px rgba(24,24,27,.14)` | — | menus/popovers/dialogs ONLY |
 
 ### Dark (equivalent)
@@ -75,8 +75,7 @@ One sentence to test every design decision against:
 | `--edge` | `rgba(228,228,231,.09)` | decorative | |
 | `--edge-strong` | `#9A9AA3` | 6.65 ✓ | meaningful boundaries |
 | `--selection` | `#FACC15` at 22% | text-on-wash ≈ 8.6 ✓ | lifts the yellow, keeps text legible |
-| `--ink-hover` | `#FAFAFA` | ≈ 16.3 on surface ✓ | chat hover: text visibly brightens |
-| `--text-glow` | `#FFFFFF` at 30% | halo only (decorative) | quieter halo for night reading |
+| `--ink-hover` | `#E4E4E7` 25% lighter | ΔL* ≈ 2.5 | word under the pointer in graphite |
 
 **Hard rules**
 - No literal color outside `tokens.css`. Off-token need = add token (both themes) first.
@@ -148,10 +147,12 @@ That's the list. Fraunces is identity, Geist is function; they never swap mid-pa
   thinking node (`.bubble.thinking` — one breathing ember dot, `ember-breathe` 1.4s,
   halo via `--intent-soft`, transform+opacity only), and skeletons (opacity pulse on
   flat blocks). Nothing else loops.
-- The chat hover lift is text-only by charter: `color: var(--ink-hover)` + a whitish
-  `text-shadow: 0 0 6px var(--text-glow)` on `#chat-area` reply glyphs. NO cursor
-  tracking, NO background pool — plain property transitions, safe under
-  reduced-motion collapse. Explain panels reuse `.bubble` markup — keep the scope.
+- The chat word lift is text-only by charter: the word under the pointer (CSS Custom
+  Highlight API range "word-hover") shifts ~10% in perceptual lightness — darker in
+  paper, brighter in graphite — and snaps back instantly on exit. NO background, NO
+  overlay, NO DOM rewrite, NO cursor tracking, so it works on streaming text and
+  leaves chips/links/code alone (skip list in `public/js/word-hover.js`). Explain
+  panels reuse `.bubble` markup — keep the scope to `#chat-area`.
 - `@media (prefers-reduced-motion: reduce)` → `* { transition-duration: 0.01ms !important;
   animation-duration: 0.01ms !important }` — verify every phase ships this.
 
@@ -258,7 +259,8 @@ in the same commit whenever possible.
   `[data-foot]` slots, so no-JS still reads "Cortex". Per-page foot links stay per
   page (content, not chrome). Keep `MARK_SVG` in sync with the `#i-cortex` sprite
   symbol (`public/index.html`) and `public/icon.svg`.
-- Chat hover lift lives entirely in CSS (`#chat-area` scoped rule in `style.css`);
-  tokens `--ink-hover`/`--text-glow` carry the pair. No JS module involved.
+- Chat word lift lives in `public/js/word-hover.js` (caret hit-test + CSS Custom
+  Highlight API) + `::highlight(word-hover)` in `style.css`. Tokens `--ink-hover`
+  carry the per-theme shift. Graceful no-op where the API is unavailable.
 - Perf budget (premium feel = fast feel): landing LCP text + fonts < 90KB; no image
   > 220KB on landing (screenshots WebP ≤ 160KB); 0 blocking font CSS besides tokens.
