@@ -1415,7 +1415,10 @@ mark.note-hl .note-pin {
 
 #summary-overlay {
   position: fixed;
-  inset: 0;
+  top: 48px;
+  bottom: 76px;
+  left: 0;
+  right: 0;
   z-index: 1200;
   background: var(--bg-alt);
   border-left: 3px solid var(--accent2);
