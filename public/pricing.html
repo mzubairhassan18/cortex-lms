@@ -114,7 +114,7 @@
 <body>
 
 <header class="nav">
-  <a class="brand" href="./"><svg class="mark" width="18" height="18" viewBox="0 0 64 64" aria-hidden="true"><path class="mark-node" d="M24.5 39.5 39.5 24.5" fill="none"/><circle class="mark-node" cx="21" cy="43" r="8.5" fill="none"/><circle class="mark-ember" cx="44" cy="20" r="9.5"/></svg> Cortex</a>
+  <a class="brand" href="./" aria-label="Cortex home" data-brand>Cortex</a>
   <nav class="nav-links">
     <a href="./#features">Features</a>
     <a href="./pricing">Pricing</a>
@@ -243,30 +243,19 @@
 
 </main>
 
-<footer class="foot">
-  <div class="foot-in">
-    <p class="foot-brand">
-      <svg class="mark" viewBox="0 0 64 64" width="18" height="18" aria-hidden="true">
-        <path class="mark-node" d="M24.5 39.5 L39.5 24.5" fill="none"/>
-        <circle class="mark-node" cx="21" cy="43" r="8.5" fill="none"/>
-        <circle class="mark-ember" cx="44" cy="20" r="9.5"/>
-      </svg>
-      Cortex
-    </p>
-    <p class="foot-note">Free tier, no card required · Bring your own model key</p>
-    <p class="foot-links">
-      <a href="./#features">Features</a>
-      <span class="dot" aria-hidden="true">·</span>
-      <a href="./pricing">Pricing</a>
-      <span class="dot" aria-hidden="true">·</span>
-      <a href="./payment">Payment</a>
-      <span class="dot" aria-hidden="true">·</span>
-      <a href="./#faq">FAQ</a>
-      <span class="dot" aria-hidden="true">·</span>
-      <a href="./signup">Sign up</a>
-    </p>
-  </div>
-</footer>
+<div data-foot hidden></div>
+
+<script type="module">
+  import { mountBrand, mountFoot } from './js/site.js';
+  mountBrand();
+  mountFoot([
+    ['Features', './#features'],
+    ['Pricing', './pricing'],
+    ['Payment', './payment'],
+    ['FAQ', './#faq'],
+    ['Sign up', './signup'],
+  ]);
+</script>
 
 </body>
 </html>

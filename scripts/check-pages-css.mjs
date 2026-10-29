@@ -15,7 +15,10 @@ for (const page of pages) {
   const html = readFileSync('public/' + page, 'utf8');
   const pageCss = [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
   const sharedCss =
-    readFileSync('public/landing.css', 'utf8') + '\n' + readFileSync('public/tokens.css', 'utf8');
+    readFileSync('public/landing.css', 'utf8') + '\n' + readFileSync('public/tokens.css', 'utf8')
+    // js/site.js injects the foot/brand chrome markup at runtime — its classes
+    // never appear in the page source, so they must join the "defined" universe.
+    + '\n' + readFileSync('public/js/site.js', 'utf8');
   const defined = new Set(
     [...(sharedCss + '\n' + pageCss + '\n' + html).matchAll(/\.([a-zA-Z][\w-]*)/g)].map((m) => m[1])
   );

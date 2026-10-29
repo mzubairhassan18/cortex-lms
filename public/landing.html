@@ -24,14 +24,7 @@
 <body>
 
 <header class="nav">
-  <a class="brand" href="./" aria-label="Cortex home">
-    <svg class="mark" viewBox="0 0 64 64" width="20" height="20" aria-hidden="true">
-      <path class="mark-node" d="M24.5 39.5 L39.5 24.5" fill="none"/>
-      <circle class="mark-node" cx="21" cy="43" r="8.5" fill="none"/>
-      <circle class="mark-ember" cx="44" cy="20" r="9.5"/>
-    </svg>
-    Cortex
-  </a>
+  <a class="brand" href="./" aria-label="Cortex home" data-brand>Cortex</a>
   <nav class="nav-links" aria-label="Sections">
     <a href="#problem">Why</a>
     <a href="#features">Features</a>
@@ -262,26 +255,16 @@
 
 </main>
 
-<footer class="foot">
-  <div class="foot-in">
-    <p class="foot-brand">
-      <svg class="mark" viewBox="0 0 64 64" width="18" height="18" aria-hidden="true">
-        <path class="mark-node" d="M24.5 39.5 L39.5 24.5" fill="none"/>
-        <circle class="mark-node" cx="21" cy="43" r="8.5" fill="none"/>
-        <circle class="mark-ember" cx="44" cy="20" r="9.5"/>
-      </svg>
-      Cortex
-    </p>
-    <p class="foot-note">A local-first learning workspace — chat, explanations, notes, summaries and quizzes in one place.</p>
-    <p class="foot-links">
-      <a href="./login">Open the app</a>
-      <span class="dot" aria-hidden="true">·</span>
-      <a href="#problem">Why Cortex</a>
-      <span class="dot" aria-hidden="true">·</span>
-      <a href="#features">Features</a>
-    </p>
-  </div>
-</footer>
+<div data-foot hidden></div>
+
+<script type="module">
+  import { mountBrand, mountFoot } from './js/site.js';
+  mountBrand();
+  mountFoot(
+    [['Open the app', './login'], ['Why Cortex', './#problem'], ['Features', './#features']],
+    'A local-first learning workspace — chat, explanations, notes, summaries and quizzes in one place.'
+  );
+</script>
 
 </body>
 </html>
