@@ -1419,6 +1419,7 @@ mark.note-hl .note-pin {
   bottom: 76px;
   left: 0;
   right: 0;
+  max-width: 600px;
   z-index: 1200;
   background: var(--bg-alt);
   border-left: 3px solid var(--accent2);
