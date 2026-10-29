@@ -1424,6 +1424,12 @@ mark.note-hl .note-pin {
 }
 #summary-overlay.hidden { display: none; }
 
+/* When an explain window is open, keep the summary on the left so the
+   explain panel stays visible on the right. */
+body.explain-open #summary-overlay {
+  right: var(--explain-w, 380px);
+}
+
 .summary-head {
   flex: none;
   display: flex;

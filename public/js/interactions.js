@@ -154,6 +154,29 @@ export function attachExplainHandlers(host) {
 
 attachExplainHandlers(explainPanels);
 
+/* Clicking a note's pin inside an explain panel opens the summary. */
+explainPanels.addEventListener('click', (e) => {
+  const pin = e.target.closest('.note-pin');
+  if (!pin) return;
+  const noteMark = pin.closest('mark.note-hl');
+  if (!noteMark || !noteMark.dataset.id) return;
+  const noteId = noteMark.dataset.id;
+  const note = (state.notes || []).find((n) => n.id === noteId);
+  if (!note) return;
+  if (summaryOverlay.classList.contains('hidden')) {
+    setSummaryOverlay(true);
+    showCachedSummary();
+  }
+  window.setTimeout(() => {
+    const item = document.querySelector(`.note-item[data-note="${noteId}"]`);
+    if (item) {
+      item.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      item.classList.add('note-flash');
+      window.setTimeout(() => item.classList.remove('note-flash'), 1600);
+    }
+  }, 250);
+});
+
 /* Clicking highlighted source text focuses its explainer container.
    Clicking a note's pin opens the notes card in the summary overlay and
    flashes that note; double-clicking the pin removes the note. */

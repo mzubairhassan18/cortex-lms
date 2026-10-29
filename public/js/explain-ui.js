@@ -317,7 +317,9 @@ export function showSidebar(force) {
   if (state.view === 'graph' && !force) return;
   state.sidebar.open = true;
   rightSidebar.classList.add('open');
+  document.body.classList.add('explain-open');
   rightSidebar.style.width = `${state.sidebar.width}px`;
+  document.documentElement.style.setProperty('--explain-w', `${state.sidebar.width}px`);
   updateExplainToggle();
   updateCollapsedSoon();
 }
@@ -326,6 +328,7 @@ export function showSidebar(force) {
 export function hideExplainPanel() {
   state.sidebar.open = false;
   rightSidebar.classList.remove('open');
+  document.body.classList.remove('explain-open');
   rightSidebar.style.width = '0px';
   // The panel is fully closed: no overlay may keep its active button
   // state (Summary/Library would otherwise stay "on" with no panel).
