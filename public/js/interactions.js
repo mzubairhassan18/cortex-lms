@@ -154,6 +154,12 @@ export function attachExplainHandlers(host) {
 
 attachExplainHandlers(explainPanels);
 
+/* Header button: show/hide the explain panel without touching the containers. */
+explainsToggle.addEventListener('click', () => {
+  if (state.sidebar.open) hideExplainPanel();
+  else showSidebar();
+});
+
 /* Clicking a note mark opens the summary and flashes that note;
    double-clicking removes the note. Works in both main chat and explain panels. */
 let noteClickTimer = null;
