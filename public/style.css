@@ -630,16 +630,13 @@ body.compact-header #model-select {
   50%      { transform: scale(1); opacity: 1; box-shadow: 0 0 0 6px var(--intent-soft); }
 }
 
-/* hover lift on assistant reply text: the GLYPHS brighten — a whitish halo
-   on the text itself, no colored pool, no cursor tracking. Deepens ink in the
-   light theme, lifts toward white in graphite. Neither wobbles under
-   reduced-motion collapse (plain property transitions to a static end state). */
-#chat-area .msg.assistant .bubble:not(.thinking) {
-  transition: color var(--t-fast), text-shadow var(--t-fast);
-}
-#chat-area .msg.assistant .bubble:not(.thinking):hover {
+/* word-hover.js lights the WORD under the pointer (CSS Custom Highlight API —
+   no spans, no background pool, no extra layer): the glyph color itself lifts a
+   touch brighter (graphite) / darker (paper), and snaps back when the pointer
+   moves on. Chat reply text only; links/code keep their own colors via the
+   module's skip list. Not motion — color only, so reduced-motion is unaffected. */
+::highlight(word-hover) {
   color: var(--ink-hover);
-  text-shadow: 0 0 6px var(--text-glow);
 }
 
 /* Markdown inside bubbles */
