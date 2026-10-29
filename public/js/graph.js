@@ -266,12 +266,17 @@ function saveLayout() {
 }
 
 /*
- * The one place a Free coordinate is applied.
+ * The one place Free overrides and re-anchoring happen.
  *
- * Everything else — node sizes, edges, the canvas box — still comes from the
- * aligned computation, so a saved position only ever replaces x/y. A node with
- * no saved entry falls through to the computed one, which is why the board
- * stays sensible for trees nobody has dragged.
+ * Direct x/y overrides (saved coordinates) replace what the aligned pass
+ * computed — nodes the user dragged keep their places. Because everything
+ * ABOVE the explanations hangs off the conversation's coordinate, an
+ * override to the conversation alone would orphan its forest at the stale
+ * aligned spot (the original long-backward-arrow bug), so when the current
+ * conversation has a saved position the whole forest is re-anchored from the
+ * effective one: depth-1 columns start immediately right of the conversation
+ * and the tree stays centred on it. Explains the user pinned by dragging are
+ * preserved; only unpinned ones re-flow.
  */
 function layout(model) {
   const out = layoutAligned(model);
@@ -282,6 +287,18 @@ function layout(model) {
     if (!saved) continue;
     p.x = saved.x;
     p.y = saved.y;
+  }
+
+  /* Re-chain the forest from a relocated conversation */
+  if (model.exps.length && layoutPositions['c:' + state.currentId]) {
+    const cur = out.pos.get('c:' + state.currentId);
+    if (cur) {
+      placeForest(model, out.pos, cur, cur.x + cur.w + GAP_X, {
+        lift: false,
+        respectPins: true,
+      });
+      reserveColumn(model, out.pos, true);
+    }
   }
 
   /* W/H/minX/minY describe the PRE-overlay positions, so recompute them: the
@@ -302,6 +319,199 @@ function layout(model) {
   out.minX = minX;
   out.minY = minY;
   return out;
+}
+
+/*
+ * lift is min(0, smallest y) over a whole positions map, so it is 0 when the
+ * board is already clear of the top edge and NEGATIVE when something
+ * overhangs it — the cursor-adjusted original hid this bug for years.
+ */
+function liftBoardOn(pos) {
+  let lift = 0;
+  for (const p of pos.values()) if (p.y < lift) lift = p.y;
+  if (lift >= 0) return 0;      // nothing overhangs the top edge
+  for (const p of pos.values()) p.y -= lift;
+  return lift;
+}
+
+/*
+ * Layouts the explanation forest of `model` onto `pos`.
+ *
+ * Depth-1 columns start at `xStart` and every deeper column follows with the
+ * per-depth widths — so Aligned mode starts after the widest column-0 node,
+ * while Free mode starts immediately right of wherever the conversation was
+ * actually placed/dragged. Likewise the anchor is the node the forest reads
+ * beside and is centred on: in Aligned that is the col0 stack position, in
+ * Free the saved one. Explains with a pinned (user-dragged) `layoutPositions`
+ * entry are left where the override put them; only free-flowing nodes are
+ * re-placed, so dragging a conversation never demolishes hand-arranged trees.
+ *
+ * opts.lift: slide the whole map back under y=0 (Aligned owns the box;
+ * Free coordinates may legitimately be negative, camera framing handles them).
+ */
+function placeForest(model, pos, anchor, xStart, opts = {}) {
+  const lift = opts.lift === true;
+  const respectPins = opts.respectPins === true;
+  const isPinned = (key) => respectPins && !!layoutPositions[key];
+
+  const colW = new Map();
+  for (const n of model.exps) {
+    const s = sizeOf(n);
+    if (!colW.has(n.depth) || colW.get(n.depth) < s.w) colW.set(n.depth, s.w);
+  }
+  const depthX = new Map();
+  let x = xStart;
+  for (let d = 1; d <= Math.max(...colW.keys()); d++) {
+    depthX.set(d, x);
+    x += (colW.get(d) || DIM.explain.w) + GAP_X;
+  }
+
+  /*
+   * Vertical reach of a branch relative to the TOP EDGE OF ITS OWN ROOT:
+   * `hi` climbs (0 or negative), `lo` falls. Only the tree and the fixed DIM
+   * sizes feed it, so it is memoised per layout and asked before placement.
+   */
+  const extMemo = new Map();
+  const extent = (id) => {
+    const hit = extMemo.get(id);
+    if (hit) return hit;
+    const s = sizeOf({ kind: 'explain', id });
+    const kids = model.idx.get(id) || [];
+    if (!kids.length) {
+      const leaf = { hi: 0, lo: s.h };
+      extMemo.set(id, leaf);
+      return leaf;
+    }
+    let next = 0;
+    let gBot = s.h;              // the node itself is part of its own branch
+    for (const k of kids) {
+      const e = extent(k.id);
+      const at = next - e.hi;    // leave the upward half its room
+      if (at + e.lo > gBot) gBot = at + e.lo;
+      next = at + e.lo + GAP_Y;
+    }
+    const mid = Math.round(s.h / 2 - gBot / 2);
+    const e = { hi: Math.min(0, mid), lo: Math.max(s.h, gBot + mid) };
+    extMemo.set(id, e);
+    return e;
+  };
+
+  /*
+   * `at` is where this node's top edge goes. Its children stack from that
+   * same edge, then the whole stack slides until it is centred on the parent —
+   * `keys` comes back so the slide can reach every descendant at once.
+   */
+  const place = (id, depth, at) => {
+    const key = 'e:' + id;
+    const s = sizeOf({ kind: 'explain', id });
+    const kids = model.idx.get(id) || [];
+    if (!isPinned(key)) pos.set(key, { x: depthX.get(depth), y: at, w: s.w, h: s.h });
+    const keys = [key];
+    if (!kids.length) return { top: at, bottom: at + s.h, keys };
+
+    let next = at;
+    let kidTop = Infinity;
+    let kidBot = -Infinity;
+    for (const k of kids) {
+      const e = extent(k.id);
+      const r = place(k.id, depth + 1, next - e.hi);
+      keys.push(...r.keys);
+      if (r.top < kidTop) kidTop = r.top;
+      if (r.bottom > kidBot) kidBot = r.bottom;
+      next = r.bottom + GAP_Y;
+    }
+    const delta = Math.round(s.h / 2 - (kidBot - at) / 2);
+    if (delta) {
+      for (let i = 1; i < keys.length; i++) {
+        if (isPinned(keys[i])) continue;
+        pos.get(keys[i]).y += delta;
+      }
+      kidTop += delta;
+      kidBot += delta;
+    }
+    return {
+      top: Math.min(at, kidTop),
+      bottom: Math.max(at + s.h, kidBot),
+      keys,
+    };
+  };
+
+  /* Anchor the forest to the anchor node so the arrows read as
+   * "this conversation, then its explanations". Each root reserves the upward
+   * half of its branch, so one forest never climbs into the one above. */
+  const minY = anchor ? anchor.y : 0;
+  let cursor = minY;
+  let forestTop = Infinity;
+  let forestBottom = -Infinity;
+
+  for (const r of model.roots) {
+    const e = extent(r);
+    const sub = place(r, 1, cursor - e.hi);
+    if (sub.top < forestTop) forestTop = sub.top;
+    if (sub.bottom > forestBottom) forestBottom = sub.bottom;
+    cursor = sub.bottom + GAP_Y * 1.4;
+  }
+
+  /*
+   * The stack was laid out from the anchor's top edge, which puts the
+   * WHOLE forest below it. Centre it instead: the middle sibling lands level
+   * with the anchor, the first above it, the last below. Explains live
+   * in columns to the right of column 0, so reaching upward costs nothing —
+   * no conversation, summary or + box is anywhere near those columns.
+   */
+  if (anchor && forestBottom > forestTop) {
+    const delta = Math.round(anchor.y + anchor.h / 2 - (forestTop + forestBottom) / 2);
+    if (delta) {
+      for (const n of model.exps) {
+        if (isPinned(n.key)) continue;
+        pos.get(n.key).y += delta;
+      }
+      forestTop += delta;
+      forestBottom += delta;
+    }
+  }
+
+  if (lift) {
+    /* Centring a tall branch on a short conversation walks it off the top of
+     * the canvas — slide everything back down; the caller's forestBottom must
+     * know the post-slide value to reserve space below the current tree. */
+    forestBottom -= liftBoardOn(pos);
+  }
+
+  return { forestTop, forestBottom };
+}
+
+/*
+ * Reserve the space the explanations just claimed.
+ *
+ * Column 0 stacks conversations one under the other, while the forest is
+ * drawn in columns to the RIGHT — so without this, expanding an explanation
+ * runs down the page straight through every conversation listed after the
+ * current one. Each conversation therefore owns a vertical band: everything
+ * below the current one starts where the current one plus its explanations
+ * ends. Runs on both layouts against the positions map being rendered.
+ */
+function reserveColumn(model, pos, skipPinned = false) {
+  const iCur = model.col0.findIndex((n) => n.key === 'c:' + state.currentId);
+  if (iCur < 0 || iCur >= model.col0.length - 1) return;
+  const here = pos.get(model.col0[iCur].key);
+  const next = pos.get(model.col0[iCur + 1].key);
+  if (!here || !next) return;
+  let bot = -Infinity;
+  for (const n of model.exps) {
+    /* pinned explains live wherever the user left them and own their own
+     * bands — they must not push the column-0 stack down */
+    if (skipPinned && layoutPositions[n.key]) continue;
+    const p = pos.get(n.key);
+    if (p && p.y + p.h > bot) bot = p.y + p.h;
+  }
+  const floor = Math.max(here.y + here.h, bot) + GAP_Y;
+  const shift = Math.max(0, floor - next.y);
+  if (shift > 0) {
+    for (let i = iCur + 1; i < model.col0.length; i++) {
+      pos.get(model.col0[i].key).y += shift;
+    }
+  }
 }
 
 /*
@@ -357,21 +567,7 @@ function layoutAligned(model) {
     });
   }
 
-  /*
-   * lift is min(0, smallest y), so it is 0 when the board is already clear of
-   * the top edge and NEGATIVE when something overhangs it. The guard used to be
-   * `lift <= 0`, which returned early in exactly that second case — making this
-   * a no-op since the day it was written, and the reason an opened explanation
-   * could end up above the viewport with no way to drag it back down.
-   */
-  const liftBoard = () => {
-    let lift = 0;
-    for (const p of pos.values()) if (p.y < lift) lift = p.y;
-    if (lift >= 0) return 0;      // nothing overhangs the top edge
-    for (const p of pos.values()) p.y -= lift;
-    y -= lift;
-    return lift;
-  };
+  /* lift now lives in liftBoardOn(pos) — shared with the Free re-anchor pass */
 
   const box = () => {
     let W = col0w;
@@ -391,151 +587,16 @@ function layoutAligned(model) {
   };
 
   if (!model.exps.length) {
-    liftBoard();
+    liftBoardOn(pos);
     return box();
   }
 
-  const colW = new Map();
-  for (const n of model.exps) {
-    const s = sizeOf(n);
-    if (!colW.has(n.depth) || colW.get(n.depth) < s.w) colW.set(n.depth, s.w);
-  }
-  const depthX = new Map();
-  let x = col0w + GAP_X;
-  for (let d = 1; d <= Math.max(...colW.keys()); d++) {
-    depthX.set(d, x);
-    x += (colW.get(d) || DIM.explain.w) + GAP_X;
-  }
-
-  /*
-   * Vertical reach of a branch relative to the TOP EDGE OF ITS OWN ROOT:
-   * `hi` climbs (0 or negative), `lo` falls. Only the tree and the fixed DIM
-   * sizes feed it, so it is memoised per layout and asked before placement.
-   */
-  const extMemo = new Map();
-  const extent = (id) => {
-    const hit = extMemo.get(id);
-    if (hit) return hit;
-    const s = sizeOf({ kind: 'explain', id });
-    const kids = model.idx.get(id) || [];
-    if (!kids.length) {
-      const leaf = { hi: 0, lo: s.h };
-      extMemo.set(id, leaf);
-      return leaf;
-    }
-    let next = 0;
-    let gBot = s.h;              // the node itself is part of its own branch
-    for (const k of kids) {
-      const e = extent(k.id);
-      const at = next - e.hi;    // leave the upward half its room
-      if (at + e.lo > gBot) gBot = at + e.lo;
-      next = at + e.lo + GAP_Y;
-    }
-    const mid = Math.round(s.h / 2 - gBot / 2);
-    const e = { hi: Math.min(0, mid), lo: Math.max(s.h, gBot + mid) };
-    extMemo.set(id, e);
-    return e;
-  };
-
-  /*
-   * `at` is where this node's top edge goes. Its children stack from that
-   * same edge, then the whole stack slides until it is centred on the parent —
-   * `keys` comes back so the slide can reach every descendant at once.
-   */
-  const place = (id, depth, at) => {
-    const key = 'e:' + id;
-    const s = sizeOf({ kind: 'explain', id });
-    const kids = model.idx.get(id) || [];
-    pos.set(key, { x: depthX.get(depth), y: at, w: s.w, h: s.h });
-    const keys = [key];
-    if (!kids.length) return { top: at, bottom: at + s.h, keys };
-
-    let next = at;
-    let kidTop = Infinity;
-    let kidBot = -Infinity;
-    for (const k of kids) {
-      const e = extent(k.id);
-      const r = place(k.id, depth + 1, next - e.hi);
-      keys.push(...r.keys);
-      if (r.top < kidTop) kidTop = r.top;
-      if (r.bottom > kidBot) kidBot = r.bottom;
-      next = r.bottom + GAP_Y;
-    }
-    const delta = Math.round(s.h / 2 - (kidBot - at) / 2);
-    if (delta) {
-      for (let i = 1; i < keys.length; i++) pos.get(keys[i]).y += delta;
-      kidTop += delta;
-      kidBot += delta;
-    }
-    return {
-      top: Math.min(at, kidTop),
-      bottom: Math.max(at + s.h, kidBot),
-      keys,
-    };
-  };
-
-  /* Anchor the forest to the current conversation so the arrows read as
-   * "this conversation, then its explanations". Each root reserves the upward
-   * half of its branch, so one forest never climbs into the one above. */
-  const cur = pos.get('c:' + state.currentId);
-  const minY = cur ? cur.y : 0;
-  let cursor = minY;
-  let forestTop = Infinity;
-  let forestBottom = -Infinity;
-
-  for (const r of model.roots) {
-    const e = extent(r);
-    const sub = place(r, 1, cursor - e.hi);
-    if (sub.top < forestTop) forestTop = sub.top;
-    if (sub.bottom > forestBottom) forestBottom = sub.bottom;
-    cursor = sub.bottom + GAP_Y * 1.4;
-  }
-
-  /*
-   * The stack was laid out from the conversation's top edge, which puts the
-   * WHOLE forest below it. Centre it instead: the middle sibling lands level
-   * with the conversation, the first above it, the last below. Explains live
-   * in columns to the right of column 0, so reaching upward costs nothing —
-   * no conversation, summary or + box is anywhere near those columns.
-   */
-  if (cur && forestBottom > forestTop) {
-    const delta = Math.round(cur.y + cur.h / 2 - (forestTop + forestBottom) / 2);
-    if (delta) {
-      for (const n of model.exps) pos.get(n.key).y += delta;
-      forestTop += delta;
-      forestBottom += delta;
-    }
-  }
-
-  /*
-   * Centring a tall branch on a short conversation walks it off the top of
-   * the canvas — see liftBoard(). The reserve below needs the forest's real
-   * bottom AFTER that slide, so it gets the lift back.
-   */
-  forestBottom -= liftBoard();
-
-  /*
-   * Reserve the space the explanations just claimed.
-   *
-   * Column 0 stacks conversations one under the other, while the forest above
-   * is drawn in columns to the RIGHT — so without this, expanding an
-   * explanation runs down the page straight through every conversation
-   * listed after the current one. Each conversation therefore owns a
-   * vertical band: everything below the current one starts where the current
-   * one plus its explanations ends.
-   */
-  const iCur = model.col0.findIndex((n) => n.key === 'c:' + state.currentId);
-  if (iCur >= 0 && iCur < model.col0.length - 1) {
-    const here = pos.get(model.col0[iCur].key);
-    const floor = Math.max(here.y + here.h, forestBottom) + GAP_Y;
-    const natural = pos.get(model.col0[iCur + 1].key).y;
-    const shift = Math.max(0, floor - natural);
-    if (shift > 0) {
-      for (let i = iCur + 1; i < model.col0.length; i++) {
-        pos.get(model.col0[i].key).y += shift;
-      }
-    }
-  }
+  /* The forest anchors on the col0 position of the active conversation and its
+   * columns start after the whole of column 0. Free mode re-anchors this in
+   * layout() below, from the conversation's real (saved) position. */
+  const anchor = pos.get('c:' + state.currentId);
+  placeForest(model, pos, anchor, col0w + GAP_X, { lift: true, respectPins: false });
+  reserveColumn(model, pos, false);
 
   return box();
 }
@@ -700,16 +761,50 @@ function applyExplain(el, n, idx) {
 
 function addPath(a, b, on) {
   if (!a || !b) return;
-  const x1 = a.x + a.w;
+  let x1, x2;
+  /* Direction-agnostic: when the target sits LEFT of its source (a free-placed
+   * conversation whose explains were anchored at the old aligned spot, or any
+   * hand-dragged tree), the elbow leaves the source's LEFT edge and enters the
+   * target's RIGHT edge — the arrow keeps pointing source → target instead of
+   * doubling back across the whole board. */
+  if (b.x + b.w < a.x) {
+    x1 = a.x;
+    x2 = b.x + b.w + EDGE_SLACK;
+  } else {
+    x1 = a.x + a.w;
+    x2 = b.x - EDGE_SLACK;
+  }
   const y1 = a.y + a.h / 2;
-  const x2 = b.x - EDGE_SLACK;
   const y2 = b.y + b.h / 2;
-  const mid = x1 + Math.max(14, (x2 - x1) / 2);
   const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  p.setAttribute('d', `M ${x1} ${y1} H ${mid} V ${y2} H ${x2}`);
+  p.setAttribute('d', elbowPath(x1, y1, x2, y2));
   p.setAttribute('marker-end', on ? 'url(#garrow-on)' : 'url(#garrow)');
   p.setAttribute('class', on ? 'gpath gpath-on' : 'gpath');
   graphPaths.appendChild(p);
+}
+
+/* Rounded orthogonal elbow: horizontal out of the source, vertical trunk in
+ * the gap between the boxes, horizontal into the target. Sharp corners kick
+ * in whenever the gap is too tight to round. */
+function elbowPath(x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  if (Math.abs(y2 - y1) < 1) return `M ${x1} ${y1} H ${x2}`;
+  if (Math.abs(dx) < 1) return `M ${x1} ${y1} V ${y2} H ${x2}`;
+  const sx = Math.sign(dx);
+  const sy = Math.sign(y2 - y1);
+  const mid = x1 + sx * Math.max(14, Math.abs(dx) / 2);
+  const r = Math.min(8, Math.abs(dx) / 2, Math.abs(y2 - y1) / 2);
+  if (r <= 1 || Math.abs(x1 - mid) <= r || Math.abs(x2 - mid) <= r) {
+    return `M ${x1} ${y1} H ${mid} V ${y2} H ${x2}`;
+  }
+  return (
+    `M ${x1} ${y1}` +
+    ` H ${mid - sx * r}` +
+    ` Q ${mid} ${y1} ${mid} ${y1 + sy * r}` +
+    ` V ${y2 - sy * r}` +
+    ` Q ${mid} ${y2} ${mid + sx * r} ${y2}` +
+    ` H ${x2}`
+  );
 }
 
 function drawEdges(model, pos) {
