@@ -1,0 +1,229 @@
+/* tokens.css — CORTEX DESIGN LANGUAGE v2 ("Graphite & Ember"). SOURCE OF TRUTH: docs/DESIGN.md
+ *
+ * Structure of this file:
+ *   1. @font-face        self-hosted Fraunces (display) + Geist/Geist Mono (UI). No CDN.
+ *   2. Primitives        spacing scale, radius ladder, motion, type scale.
+ *   3. Semantic tokens   light (paper, default) + dark (graphite night). Every color
+ *                        pair verified against WCAG 2.2 relative luminance — ratios
+ *                        documented in docs/DESIGN.md §2. Do not add colors elsewhere;
+ *                        add them HERE, to BOTH blocks, or the other theme silently
+ *                        keeps the dark value.
+ *   4. Legacy aliases    maps the pre-redesign variable names (style.css/graph.css/
+ *                        landing.css consumed them) onto the new system so the whole
+ *                        app re-skins from this one file while Phase D sweeps selectors.
+ *                        DELETE the alias block when the last old selector is migrated.
+ *   5. Base layer        focus-visible, selection, scrollbars, reduced-motion, font floors.
+ */
+
+/* ── 1. fonts ─────────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: 'Geist';
+  src: url('vendor/fonts/Geist-VF.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('vendor/fonts/GeistMono-VF.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Fraunces';
+  src: url('vendor/fonts/Fraunces-VF.woff2') format('woff2-variations');
+  font-weight: 400 700;
+  font-style: normal;
+  font-stretch: normal;
+  font-display: swap;
+}
+
+/* ── 2. primitives ────────────────────────────────────────────────────────── */
+
+:root {
+  /* spacing — 8-point, nothing else exists */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;  --s9: 96px;
+
+  /* radius ladder — denser surface ⇒ smaller radius */
+  --r-xs: 4px; --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-xl: 20px; --r-pill: 999px;
+
+  /* motion — enter curve, quiet; no springs */
+  --t-fast: 120ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  --t-med:  200ms cubic-bezier(0.20, 0.60, 0.25, 1);
+  --t-slow: 320ms cubic-bezier(0.20, 0.60, 0.25, 1);
+
+  /* type scale — each step has exactly one role (docs/DESIGN.md §3) */
+  --fs-2xs: 11.5px;  /* uppercase eyebrows only, +0.08em */
+  --fs-xs: 12px;     /* fine print / meta — absolute floor */
+  --fs-sm: 13px;     /* code, kbd */
+  --fs-ui: 13.5px;   /* UI text, buttons, labels */
+  --fs-body: 15.5px; /* reading streams: chat, explain, summary */
+  --fs-body-lg: 17px;/* ledes, community copy */
+
+  --font-ui: 'Geist', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-display: 'Fraunces', 'Geist', serif;   /* identity moments ONLY (DESIGN §3) */
+  --font-mono: 'Geist Mono', ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+}
+
+/* ── 3. semantic tokens — LIGHT is primary (paper desk) ───────────────────── */
+
+:root, [data-theme='light'] {
+  color-scheme: light;
+
+  --canvas: #FAFAFA;         /* page — soft paper, never stark white */
+  --surface: #FFFFFF;        /* raised cards */
+  --well: #F4F4F5;           /* wells: code blocks, insets, active rows */
+  --ink: #18181B;            /* text AND primary action fill (ratios: 16.97/17.7) */
+  --muted: #66666E;          /* secondary text (5.45 canvas · 5.18 well) */
+  --faint: #6E6E76;          /* tertiary/meta (4.84) */
+
+  --intent: #C2410C;         /* EMBER — AI features + focus/intent marks ONLY.
+                                Text 4.96 canvas · 5.18 white. Never a fill. */
+  --intent-soft: rgba(194, 65, 12, 0.10);   /* tint fill (never text on tint) */
+  --ok: #15803D;             /* success/checked only (4.81) */
+  --warn: #92400E;           /* warnings — small text */
+  --danger: #B91C1C;         /* destructive text (6.20) */
+
+  --edge: rgba(24, 24, 27, 0.08);      /* decorative hairlines */
+  --edge-card: rgba(24, 24, 27, 0.10); /* card skin hairline (legacy --border) */
+  --edge-strong: #87878F;              /* meaningful boundaries (3.41 ≥ 1.4.11) */
+  --edge-focus: #C2410C;               /* focus ring (4.96 ≥ 3) */
+
+  --btn-text: #FFFFFF;       /* text on ink/primary fills */
+  --shadow-pop: 0 8px 24px rgba(24, 24, 27, 0.14);  /* menus/dialogs/toasts ONLY */
+
+  --dot-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='1.5' cy='1.5' r='1.2' fill='%2318181B' fill-opacity='0.05'/%3E%3C/svg%3E");
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --canvas: #131316;
+  --surface: #1C1C20;
+  --well: #26262B;
+  --ink: #E4E4E7;            /* text; buttons render ink fill + dark text (inverted) */
+  --muted: #A1A1AA;          /* 6.63 surface · 7.24 canvas */
+  --faint: #8D8D96;          /* 5.64 */
+
+  --intent: #FB923C;         /* ember lifts at night (8.19 ≥ 3 both roles) */
+  --intent-soft: rgba(251, 146, 60, 0.12);
+  --ok: #4ADE80;             /* 10.64 */
+  --warn: #FBBF24;
+  --danger: #F87171;         /* 6.70 */
+
+  --edge: rgba(228, 228, 231, 0.09);
+  --edge-card: rgba(228, 228, 231, 0.11);
+  --edge-strong: #9A9AA3;    /* 6.65 */
+  --edge-focus: #FB923C;
+
+  --btn-text: #131316;       /* matches inverted primary button */
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
+
+  --dot-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Ccircle cx='1.5' cy='1.5' r='1.2' fill='%23E4E4E7' fill-opacity='0.06'/%3E%3C/svg%3E");
+}
+
+/* ── 4. legacy aliases — Phase D deletes this block ───────────────────────── */
+
+:root, [data-theme='light'], [data-theme='dark'] {
+  /* surfaces */
+  --bg: var(--canvas);
+  --bg-alt: var(--canvas);
+  --bg-panel: var(--surface);
+  --bg-raise: var(--surface);
+  --bg-sunken: var(--well);
+  /* text */
+  --text: var(--ink);
+  --text-dim: var(--muted);
+  /* chrome — the old blue/green accents retire: ink is the action color,
+     muted takes over decoration; ember is available explicitly as --intent.
+     (During Phase D, --accent aliases to ink; new code uses --intent.) */
+  --accent-ember: var(--intent);
+  --accent: var(--ink);
+  --accent2: var(--muted);
+  --on-accent: var(--btn-text);
+  --on-accent-a: var(--btn-text);
+  --on-accent-b: var(--btn-text);
+  /* edges */
+  --border: var(--edge-card);
+  --border-hi: var(--edge-strong);
+  /* semantic */
+  /* semantic (danger/ok/warn come from the layer above; tinted legacy variants here) */
+  --danger-tint: rgba(185, 28, 28, 0.08);
+  --green-bg: rgba(21, 128, 61, 0.10);
+  --green-line: var(--ok);
+  --yellow: var(--warn);
+  --yellow-bg: rgba(146, 64, 14, 0.10);
+  --yellow-hover: rgba(146, 64, 14, 0.16);
+  --yellow-line: var(--warn);
+  /* tints on surfaces (cols/tags/picks) */
+  --drop-tint: rgba(24, 24, 27, 0.03);
+  --pick-bg: rgba(24, 24, 27, 0.04);
+  --count-bg: rgba(24, 24, 27, 0.05);
+  --tab-bg: rgba(24, 24, 27, 0.06);
+  --tag-bg: rgba(24, 24, 27, 0.04);
+  --tag-line: var(--edge);
+  /* bubbles → thread layout */
+  --user-bubble: var(--well);
+  --assistant-bubble: transparent;
+  /* elevation retires; popovers get shadow-pop explicitly in Phase D */
+  --shadow: rgba(0, 0, 0, 0);
+  --shadow-sm: 0 0 0 rgba(0, 0, 0, 0);
+  --shadow-md: 0 0 0 rgba(0, 0, 0, 0);
+  --shadow-lg: var(--shadow-pop);
+  /* texture: grain dies app-wide; dot grid survives on the graph canvas only */
+  --texture: none;
+  --grain-opacity: 0;
+  --dot-opacity: 1;
+  --dot-color: var(--ink);
+}
+
+/* dark-theme tint deltas (the shared alias list above is colorless percentages,
+   so only hue-carrying aliases need theme variants) */
+[data-theme='dark'] {
+  --danger-tint: rgba(248, 113, 113, 0.10);
+  --green-bg: rgba(74, 222, 128, 0.10);
+  --yellow-bg: rgba(251, 191, 36, 0.12);
+  --yellow-hover: rgba(251, 191, 36, 0.18);
+  --drop-tint: rgba(228, 228, 231, 0.03);
+  --pick-bg: rgba(228, 228, 231, 0.045);
+  --count-bg: rgba(228, 228, 231, 0.055);
+  --tab-bg: rgba(228, 228, 231, 0.07);
+  --tag-bg: rgba(228, 228, 231, 0.045);
+  --tag-line: var(--edge);
+  --dot-color: var(--ink);
+}
+
+/* ── 5. base layer — a11y + typography floors ─────────────────────────────── */
+
+body {
+  font-family: var(--font-ui);       /* overrides legacy Segoe UI declarations */
+  background-image: none;            /* body-level grain/dots retire (graph keeps its canvas dot-grid) */
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
+}
+
+/* every interactive element gets a visible ember ring (2.4.7) */
+:focus-visible {
+  outline: 2px solid var(--edge-focus);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) { outline: none; }
+
+::selection { background: var(--accent-soft); }
+
+/* thin, unobtrusive scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--edge-strong) transparent; }
+
+/* honoring 2.3.3 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
